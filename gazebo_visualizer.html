@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gazebo 3D Drone Simulator & ArduPilot Telemetry</title>
+    <!-- Google Fonts & Three.js -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0a0e17;
+            --card-bg: rgba(16, 23, 38, 0.75);
+            --border: rgba(56, 189, 248, 0.2);
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.4);
+            --accent: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #viewport-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Glassmorphism UI Overlay */
+        .overlay-header {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .header-title {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            padding: 12px 24px;
+            border-radius: 16px;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-title h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            text-transform: uppercase;
+        }
+
+        .controls-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            padding: 10px 16px;
+            border-radius: 16px;
+            pointer-events: auto;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn-mode {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-mode:hover, .btn-mode.active {
+            background: var(--primary);
+            color: #000;
+            border-color: var(--primary);
+            box-shadow: 0 0 16px var(--primary-glow);
+        }
+
+        /* Telemetry Sidebar Card */
+        .telemetry-card {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+            width: 340px;
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .card-header {
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .data-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 12px;
+        }
+
+        .data-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .data-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .value-highlight {
+            color: var(--primary);
+        }
+
+        .value-accent {
+            color: var(--accent);
+        }
+
+        /* Status Dot */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            display: inline-block;
+            margin-right: 6px;
+        }
+        /* Target Controller Panel */
+        .target-panel {
+            position: absolute;
+            top: 90px;
+            right: 20px;
+            z-index: 10;
+            width: 320px;
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 16px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .target-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin: 12px 0;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .input-group label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .input-group input {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 8px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .btn-fly {
+            width: 100%;
+            background: linear-gradient(135deg, #38bdf8, #3b82f6);
+            border: none;
+            color: #000;
+            font-weight: 700;
+            padding: 10px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            box-shadow: 0 0 16px var(--primary-glow);
+            transition: all 0.2s ease;
+        }
+
+        .btn-fly:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 24px var(--primary-glow);
+        }
+
+        .preset-btns {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .btn-preset {
+            flex: 1;
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 6px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-preset:hover {
+            background: var(--primary);
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="viewport-container"></div>
+
+    <!-- UI Overlay Header -->
+    <div class="overlay-header">
+        <div class="header-title">
+            <span class="status-dot"></span>
+            <h1>Gazebo 3D Drone Simulator</h1>
+            <span class="badge" id="sim-status">SITL Ready</span>
+        </div>
+        <div class="controls-card">
+            <button class="btn-mode active" id="btn-setpoint" onclick="setMode('setpoint')">Setpoint Target</button>
+            <button class="btn-mode" id="btn-helix" onclick="setMode('helix')">Vertical Helix</button>
+        </div>
+    </div>
+
+    <!-- Target Setpoint Controller Panel -->
+    <div class="target-panel">
+        <div class="card-header" style="margin-bottom: 4px;">
+            <span>Target Controller</span>
+            <span style="font-size: 0.75rem; color: var(--accent);">Interactive</span>
+        </div>
+        <div class="target-inputs">
+            <div class="input-group">
+                <label>X (m)</label>
+                <input type="number" id="input-x" value="2.0" step="0.5">
+            </div>
+            <div class="input-group">
+                <label>Y (m)</label>
+                <input type="number" id="input-y" value="2.0" step="0.5">
+            </div>
+            <div class="input-group">
+                <label>Z (Alt m)</label>
+                <input type="number" id="input-z" value="3.0" step="0.5" min="0.5">
+            </div>
+        </div>
+        <button class="btn-fly" onclick="sendTarget()">Fly to Target</button>
+        <div class="preset-btns">
+            <button class="btn-preset" onclick="applyPreset(0, 0, 2)">Hover (0,0,2)</button>
+            <button class="btn-preset" onclick="applyPreset(2, 2, 3)">Point A (2,2,3)</button>
+            <button class="btn-preset" onclick="applyPreset(-2, 3, 1.5)">Point B (-2,3,1.5)</button>
+        </div>
+    </div>
+
+    <!-- Telemetry Box -->
+    <div class="telemetry-card">
+        <div class="card-header">
+            <span>Telemetry Dashboard</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);" id="ws-status">WS: Connecting...</span>
+        </div>
+        <div class="data-grid">
+            <div class="data-box">
+                <div class="data-label">Actual Position (m)</div>
+                <div class="data-value value-highlight" id="val-pos">0.00, 0.00, 0.00</div>
+            </div>
+            <div class="data-box">
+                <div class="data-label">Target Position (m)</div>
+                <div class="data-value" id="val-ref">1.00, 1.00, 2.00</div>
+            </div>
+            <div class="data-box">
+                <div class="data-label">Tracking Error</div>
+                <div class="data-value value-accent" id="val-error">0.000 m</div>
+            </div>
+            <div class="data-box">
+                <div class="data-label">Total Thrust</div>
+                <div class="data-value" id="val-thrust">14.72 N</div>
+            </div>
+            <div class="data-box" style="grid-column: span 2;">
+                <div class="data-label">MAVLink Connection</div>
+                <div class="data-value" style="font-size: 0.8rem; color: var(--primary);" id="val-conn">127.0.0.1:5760 (TCP)</div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // -------------------------------------------------------------
+        // Three.js 3D Gazebo Viewport Initialization
+        // -------------------------------------------------------------
+        const container = document.getElementById('viewport-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0e17);
+        scene.fog = new THREE.FogExp2(0x0a0e17, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(4, 4, 3);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 0, 1);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0x38bdf8, 1.2);
+        dirLight.position.set(10, 20, 15);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Gazebo Ground Grid
+        const gridHelper = new THREE.GridHelper(40, 40, 0x38bdf8, 0x1e293b);
+        gridHelper.rotation.x = Math.PI / 2; // Orient grid in ENU (Z-Up)
+        scene.add(gridHelper);
+
+        const axesHelper = new THREE.AxesHelper(1.5);
+        scene.add(axesHelper);
+
+        // -------------------------------------------------------------
+        // 3D Quadrotor Drone Model Construction
+        // -------------------------------------------------------------
+        const droneGroup = new THREE.Group();
+
+        // Carbon Frame Center Body
+        const bodyGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.06, 16);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.2 });
+        const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+        bodyMesh.rotation.x = Math.PI / 2;
+        droneGroup.add(bodyMesh);
+
+        // Arms & Rotors
+        const armMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.5, roughness: 0.3 });
+        const rotorMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.7 });
+
+        const rotors = [];
+        const armLength = 0.45;
+        const angles = [Math.PI/4, 3*Math.PI/4, 5*Math.PI/4, 7*Math.PI/4];
+
+        angles.forEach(angle => {
+            const armGeo = new THREE.CylinderGeometry(0.015, 0.015, armLength, 8);
+            const armMesh = new THREE.Mesh(armGeo, armMat);
+            armMesh.position.set(Math.cos(angle) * armLength/2, Math.sin(angle) * armLength/2, 0);
+            armMesh.rotation.z = angle + Math.PI/2;
+            armMesh.rotation.x = Math.PI/2;
+            droneGroup.add(armMesh);
+
+            // Rotor Motor Cap
+            const motorGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.05, 12);
+            const motorMesh = new THREE.Mesh(motorGeo, bodyMat);
+            motorMesh.position.set(Math.cos(angle) * armLength, Math.sin(angle) * armLength, 0.03);
+            motorMesh.rotation.x = Math.PI/2;
+            droneGroup.add(motorMesh);
+
+            // Spinning Rotor Blade
+            const bladeGeo = new THREE.BoxGeometry(0.25, 0.02, 0.005);
+            const bladeMesh = new THREE.Mesh(bladeGeo, rotorMat);
+            bladeMesh.position.set(Math.cos(angle) * armLength, Math.sin(angle) * armLength, 0.06);
+            droneGroup.add(bladeMesh);
+            rotors.push(bladeMesh);
+        });
+
+        scene.add(droneGroup);
+
+        // Target Setpoint Sphere Marker
+        const targetGeo = new THREE.SphereGeometry(0.12, 16, 16);
+        const targetMat = new THREE.MeshBasicMaterial({ color: 0x10b981, wireframe: true });
+        const targetMesh = new THREE.Mesh(targetGeo, targetMat);
+        scene.add(targetMesh);
+
+        // Trajectory Path Trail Line
+        const maxPoints = 500;
+        const pathPositions = new Float32Array(maxPoints * 3);
+        const pathGeometry = new THREE.BufferGeometry();
+        pathGeometry.setAttribute('position', new THREE.BufferAttribute(pathPositions, 3));
+        const pathMaterial = new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 2 });
+        const pathLine = new THREE.Line(pathGeometry, pathMaterial);
+        scene.add(pathLine);
+
+        let pointIndex = 0;
+
+        function addPathPoint(x, y, z) {
+            const positions = pathGeometry.attributes.position.array;
+            positions[pointIndex * 3] = x;
+            positions[pointIndex * 3 + 1] = y;
+            positions[pointIndex * 3 + 2] = z;
+            pointIndex = (pointIndex + 1) % maxPoints;
+            pathGeometry.attributes.position.needsUpdate = true;
+        }
+
+        // -------------------------------------------------------------
+        // WebSocket Telemetry Connection & Rendering Loop
+        // -------------------------------------------------------------
+        let socket;
+
+        function connectWebSocket() {
+            socket = new WebSocket("ws://127.0.0.1:8081");
+
+            socket.onopen = () => {
+                document.getElementById('ws-status').innerText = "WS: Connected";
+                document.getElementById('ws-status').style.color = "var(--accent)";
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // Update 3D Drone Position & Orientation
+                const [px, py, pz] = data.pos;
+                const [refx, refy, refz] = data.ref;
+                const [qw, qx, qy, qz] = data.quat;
+
+                droneGroup.position.set(px, py, pz);
+                droneGroup.quaternion.set(qx, qy, qz, qw); // Three.js uses (x, y, z, w)
+
+                targetMesh.position.set(refx, refy, refz);
+                addPathPoint(px, py, pz);
+
+                // Spin Rotors
+                rotors.forEach((r, idx) => {
+                    r.rotation.z += (idx % 2 === 0 ? 0.4 : -0.4);
+                });
+
+                // Update UI Telemetry Box
+                document.getElementById('val-pos').innerText = `${px.toFixed(2)}, ${py.toFixed(2)}, ${pz.toFixed(2)}`;
+                document.getElementById('val-ref').innerText = `${refx.toFixed(2)}, ${refy.toFixed(2)}, ${refz.toFixed(2)}`;
+                document.getElementById('val-error').innerText = `${data.error.toFixed(3)} m`;
+                document.getElementById('val-thrust').innerText = `${data.thrust.toFixed(2)} N`;
+                document.getElementById('sim-status').innerText = data.status;
+                document.getElementById('val-conn').innerText = data.connection;
+            };
+
+            socket.onclose = () => {
+                document.getElementById('ws-status').innerText = "WS: Reconnecting...";
+                document.getElementById('ws-status').style.color = "#f59e0b";
+                setTimeout(connectWebSocket, 2000);
+            };
+        }
+
+        connectWebSocket();
+
+        function setMode(mode) {
+            document.getElementById('btn-setpoint').classList.toggle('active', mode === 'setpoint');
+            document.getElementById('btn-helix').classList.toggle('active', mode === 'helix');
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ set_mode: mode }));
+            }
+        }
+
+        function sendTarget() {
+            const x = parseFloat(document.getElementById('input-x').value) || 0.0;
+            const y = parseFloat(document.getElementById('input-y').value) || 0.0;
+            const z = parseFloat(document.getElementById('input-z').value) || 2.0;
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ set_target: [x, y, z] }));
+                document.getElementById('btn-setpoint').classList.add('active');
+                document.getElementById('btn-helix').classList.remove('active');
+            }
+        }
+
+        function applyPreset(x, y, z) {
+            document.getElementById('input-x').value = x;
+            document.getElementById('input-y').value = y;
+            document.getElementById('input-z').value = z;
+            sendTarget();
+        }
+
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
