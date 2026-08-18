@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/amrita_logo.png" alt="Amrita Vishwa Vidyapeetham" width="60%">
+  <img src="assets/amrita_logo.png" alt="Amrita Vishwa Vidyapeetham" width="80%">
 </p>
 
 <h1 align="center">Quadrotor Backstepping Trajectory Tracking Control</h1>
@@ -24,10 +24,10 @@
 | S. No. | Name | Roll Number | Email |
 |---:|---|---|---|
 | 1 | Kallam Pratheep Reddy | CB.SC.U4AIE24021 | kallampratheepreddy72@gmail.com |
-| 2 | Chaithanya G Nambiar | CB.SC.U4AIE24013 | — |
-| 3 | Surabhi Saha | CB.SC.U4AIE24057 | — |
-| 4 | Anakha | CB.SC.U4AIE24006 | — |
-| 5 | Mahendra Mula | CB.SC.U4AIE24032 | — |
+| 2 | Chaithanya G Nambiar | CB.SC.U4AIE24013 |Cb.sc.u4aie24013@cb.students.amrita.edu |
+| 3 | Surabhi Saha | CB.SC.U4AIE24057 | saha8.surabhi@gmail.com |
+| 4 | Anakha | CB.SC.U4AIE24006 | anakhas443@gmail.com |
+| 5 | Mahendra Mula | CB.SC.U4AIE24033 | maheshbanu58@gmail.com |
 
 ---
 
