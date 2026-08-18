@@ -78,98 +78,159 @@ The present project implements the quaternion decomposition and backstepping con
 
 The system is implemented as four integrated layers, each independently testable.
 
-### 4.1 Quaternion Attitude Parametrization
+---
 
-A unit quaternion $q \in \mathbb{R}^4$, $\|q\| = 1$, parameterizes the rotation from an inertial frame $\{I\}$ to the body-fixed frame $\{B\}$. Its time derivative is:
+### 4.1 Quaternion Attitude Parametrization
 
 $$\dot{q} = \frac{1}{2} Q(q) \begin{bmatrix} \omega \\ 0 \end{bmatrix}$$
 
-where $\omega = [\omega_x\ \omega_y\ \omega_z]^\top$ is the body angular velocity and $Q(q)$ is the quaternion product matrix (Eq. 4, base paper).
+> **📘 What this means:**
+> A **quaternion** $q = (w, x, y, z)$ is a 4-number way to describe how the drone is tilted in 3D space, without the "gimbal lock" problem that Euler angles (roll/pitch/yaw) have.
+> This formula says: *"The rate at which the drone's orientation is changing equals half the current orientation multiplied by the angular velocity $\omega$."*
+> In simple terms — if the drone is spinning, this tells us how the quaternion changes every moment to stay up-to-date with the rotation.
+> - $\omega$ = the drone's spin rate (how fast it rotates around each axis)
+> - $Q(q)$ = a matrix built from the current quaternion that combines the rotation math
+
+---
 
 ### 4.2 Decoupled Attitude Decomposition
 
-Following Eq. (5)–(14) of the base paper, $q$ is factored as:
-
 $$q = q_{xy} \otimes q_z$$
 
-where:
-- $q_{xy} = [q_x\ \ q_y\ \ 0\ \ q_p]^\top$ describes the **tilt** of the thrust vector (roll + pitch), with $q_p = \sqrt{q_3^2 + q_4^2}$
-- $q_z = [0\ \ 0\ \ q_z\ \ q_w]^\top$ describes the **heading** (yaw)
+> **📘 What this means:**
+> This is the **key idea** from the paper. Instead of dealing with one complex quaternion for all rotation, we split it into two simpler parts:
+> - $q_{xy}$ = the **tilt** quaternion — describes how much the drone is leaning (roll + pitch), which directly controls where the thrust points
+> - $q_z$ = the **heading** quaternion — describes which direction the drone is facing (yaw)
+> - $\otimes$ = quaternion multiplication (combining two rotations)
+>
+> **Why this matters:** By splitting them, we can control the drone's position and heading *independently* — like separate steering wheels for "where to go" and "which way to face".
 
-The elements are recovered from the full quaternion $q = (q_1, q_2, q_3, q_4)^\top$ as:
+The elements are extracted from the full quaternion $q = (q_1, q_2, q_3, q_4)$ as:
 
-$$q_p = \sqrt{q_3^2 + q_4^2}, \qquad
-q_x = \frac{q_4 q_1 - q_3 q_2}{q_p}, \qquad
-q_y = \frac{q_4 q_2 + q_3 q_1}{q_p}$$
+$$q_p = \sqrt{q_3^2 + q_4^2}$$
+
+> **📘** $q_p$ is the **magnitude of the heading part**. It's used as a denominator to normalize the tilt components below.
+
+$$q_x = \frac{q_4 q_1 - q_3 q_2}{q_p}, \qquad q_y = \frac{q_4 q_2 + q_3 q_1}{q_p}$$
+
+> **📘** $q_x$ and $q_y$ are the **tilt components** (roll + pitch information). They tell us the direction the drone's top (thrust axis) is pointing, relative to straight up.
 
 $$q_w = \frac{|q_4|}{q_p}, \qquad q_z = \mathrm{sgn}(q_3 \cdot q_4)\frac{|q_3|}{q_p}$$
 
-This decomposition is implemented in [`decompose_attitude`](quadrotor_controller/controller.py). The sign convention on $q_z$ eliminates the quaternion ambiguity and prevents the unwinding phenomenon (Bhat & Bernstein, 2000).
+> **📘** $q_w$ and $q_z$ are the **heading components** (yaw information). The sign function $\mathrm{sgn}(\cdot)$ ensures we always pick the "short way round" for rotation — like turning 90° right instead of 270° left — preventing the "unwinding" problem where a drone spins unnecessarily.
+
+---
 
 ### 4.3 Translational Dynamics
 
-The quadrotor translational dynamics in the inertial frame are (Eq. 25–26, base paper):
+$$\dot{x} = v, \qquad m\dot{v} = mg\hat{e}_3 + T$$
 
-$$\dot{x} = v, \qquad m\dot{v} = f(v) + mg\hat{e}_3 + T$$
+> **📘 What this means:**
+> These two equations describe **how the drone moves through space**:
+> - $\dot{x} = v$ — the position changes at the rate of the velocity. Simple: if you're moving at 2 m/s, your position changes by 2 m every second.
+> - $m\dot{v} = mg\hat{e}_3 + T$ — this is Newton's second law (Force = mass × acceleration) for the drone. The forces acting on it are:
+>   - $mg\hat{e}_3$ = gravity pulling downward
+>   - $T$ = the thrust force from the propellers pushing upward/sideways
+>
+> The controller's job is to choose the right $T$ (thrust direction + magnitude) to overcome gravity and move to the target position.
 
-where $x = [x\ y\ z]^\top$ is position, $v$ is velocity, $m$ is mass, $g$ is gravity, and $T$ is the total thrust vector pointing along the body $+z$ axis. Drag $f(v)$ is omitted in the simulation.
+---
 
 ### 4.4 Backstepping Position Control
 
-The controller follows the cascaded Lyapunov backstepping procedure of Section III of the base paper.
+Backstepping works like a **chain of goals**: first fix position, then fix velocity, then fix thrust — each step building on the previous one.
 
-**Step 1 — Position error and desired velocity:**
+**Step 1 — Define how far off we are from the target position:**
 
-$$z_x = x - x_T, \qquad V_x = \tfrac{1}{2} z_x^\top z_x$$
+$$z_x = x - x_T$$
 
-$$\dot{V}_x = z_x^\top(v - \dot{x}_T) \implies v_d = \dot{x}_T + A_x z_x, \quad A_x < 0$$
+> **📘** $z_x$ is the **position error** — how far the drone currently is from where it should be. If the drone is at (3, 0, 2) m and the target is (5, 0, 2) m, then $z_x = -2$ m in X.
 
-**Step 2 — Velocity error and desired thrust vector:**
+$$V_x = \frac{1}{2} z_x^\top z_x$$
 
-$$z_v = v - v_d, \qquad V_v = V_x + \tfrac{1}{2}z_v^\top z_v$$
+> **📘** $V_x$ is a **Lyapunov function** — think of it as an "energy" that we want to shrink to zero. When $V_x = 0$, the position error is zero and the drone is exactly at the target. The backstepping method guarantees this energy always decreases.
 
-$$T_d = m\bigl(-f(v) - g\hat{e}_3 + \dot{v}_d - z_x + A_v z_v\bigr), \quad A_v < 0$$
+$$v_d = \dot{x}_T + A_x z_x, \quad A_x < 0$$
 
-In code, this collapses to a desired acceleration:
+> **📘** $v_d$ is the **desired velocity** the drone should have right now. It has two parts:
+> - $\dot{x}_T$ = the velocity the trajectory itself is moving at (feedforward)
+> - $A_x z_x$ = a correction term that pushes toward the target (since $A_x < 0$, a positive error produces a negative correction, pulling the drone back)
+
+**Step 2 — Define how far off the velocity is:**
+
+$$z_v = v - v_d$$
+
+> **📘** $z_v$ is the **velocity error** — how different the current speed is from the desired speed $v_d$ computed above.
 
 $$\ddot{x}_{des} = \ddot{x}_T + k_{pos}(x_T - x) + k_{vel}(\dot{x}_T - v)$$
 
+> **📘** This is the **desired acceleration** the drone should achieve. It has three components:
+> - $\ddot{x}_T$ = the trajectory's own acceleration (feedforward — anticipates where the path is going)
+> - $k_{pos}(x_T - x)$ = position correction — if too far from target, accelerate toward it
+> - $k_{vel}(\dot{x}_T - v)$ = velocity correction — if moving too slow/fast, correct the speed
+
 $$\vec{T} = m\,g\hat{e}_3 + m\,\ddot{x}_{des}$$
 
-implemented in [`compute_command`](quadrotor_controller/controller.py).
+> **📘** The **required thrust vector**. To achieve the desired acceleration, the drone needs:
+> - $m\,g\hat{e}_3$ = enough thrust to just cancel gravity (hover thrust)
+> - $m\,\ddot{x}_{des}$ = extra thrust to produce the desired movement
+>
+> The direction of $\vec{T}$ tells us which way to tilt the drone; its magnitude is how hard the motors spin.
 
-**Horizontal acceleration safety cap** (simulation stability):
+**Horizontal acceleration cap:**
 
-$$a_{xy} \leftarrow \frac{a_{xy}}{\|a_{xy}\|} \cdot \min\!\bigl(\|a_{xy}\|,\ 5.0\bigr) \text{ m/s}^2$$
+$$a_{xy} \leftarrow \frac{a_{xy}}{\|a_{xy}\|} \cdot \min(\|a_{xy}\|,\ 5.0) \text{ m/s}^2$$
+
+> **📘** A **safety limiter**. If the computed horizontal acceleration is too large (>5 m/s²), it gets scaled down to 5 m/s² while keeping the same direction. This prevents extreme tilting that could flip the drone.
 
 **Thrust saturation:**
 
-$$T = \max\!\bigl(0,\ \min\!\bigl(2.5\,mg,\ \|\vec{T}\|\bigr)\bigr)$$
+$$T = \max(0,\ \min(2.5\,mg,\ \|\vec{T}\|))$$
 
-### 4.5 Tilt Attitude Error (in $\mathbb{R}^3$)
+> **📘** Another **safety limiter**. The thrust is clamped between 0 (can't push the drone into the ground) and 2.5 × the hover thrust (~36.8 N). This models realistic motor limits — propellers can only spin so fast.
 
-Rather than computing a quaternion attitude error (which can suffer from the unwinding problem), the paper and this implementation use a **vectorial difference of thrust directions in $\mathbb{R}^3$** (Section III-A, base paper):
+---
 
-$$\hat{z}_{actual} = R(q)\,\hat{e}_3, \qquad \hat{z}_{desired} = \frac{\vec{T}}{\|\vec{T}\|}$$
+### 4.5 Tilt Attitude Error
+
+$$\hat{z}_{actual} = R(q)\,\hat{e}_3$$
+
+> **📘** $\hat{z}_{actual}$ is the **direction the drone's top is currently pointing** (its thrust axis in the world frame). $R(q)$ rotates the body-frame up-vector using the current quaternion.
+
+$$\hat{z}_{desired} = \frac{\vec{T}}{\|\vec{T}\|}$$
+
+> **📘** $\hat{z}_{desired}$ is the **direction we want the drone to point** its thrust, derived from the required thrust vector above. Normalizing $(\div \|\vec{T}\|)$ gives a unit direction vector.
 
 $$\tau_{rp} = k_{tilt}\ (\hat{z}_{actual} \times \hat{z}_{desired}) - k_{rate}\ \omega_{rp}$$
 
-The cross product selects the shortest rotational path and always rotates through the smaller angle, preventing unwanted large-angle rotations.
+> **📘** This computes the **roll and pitch torque commands**:
+> - $\hat{z}_{actual} \times \hat{z}_{desired}$ = the **cross product** of two direction vectors. Its magnitude is proportional to the angle between them, and its direction is the axis to rotate around to align them. This automatically picks the *shortest rotation path* — never spinning more than 180°.
+> - $k_{tilt} \times (\text{cross product})$ = proportional correction: bigger angle → stronger torque
+> - $-k_{rate} \times \omega_{rp}$ = damping term: slows down rotation to prevent overshooting (like a shock absorber)
+
+---
 
 ### 4.6 Independent Yaw Control
 
-Since the heading dynamics are decoupled from translational dynamics (Eq. 24 and Section III-B of the base paper), yaw is controlled independently:
+$$\psi_{error} = \mathrm{wrap}(\psi_{ref} - \psi_{actual})$$
 
-$$\psi_{error} = \mathrm{wrap}(\psi_{ref} - \psi_{actual}),$$
+> **📘** $\psi_{error}$ is the **heading error** — how many degrees the drone needs to rotate to face the right direction. The `wrap` function keeps the error in the range $(-180°, +180°]$ so the drone always turns the short way — e.g. turns 10° right instead of 350° left.
 
 $$\tau_{yaw} = k_{yaw}\,\psi_{error} - k_{rate}\,\omega_z$$
 
-where $\mathrm{wrap}(\cdot)$ maps the angle to $(-\pi, \pi]$. The closed-loop heading dynamics are:
+> **📘** The **yaw (heading) torque command**:
+> - $k_{yaw} \times \psi_{error}$ = proportional correction: rotate faster when farther off heading
+> - $-k_{rate} \times \omega_z$ = damping: slow down yaw rotation near the target to avoid spinning past it
+>
+> **Key insight:** Because of the $q_{xy}/q_z$ split, this yaw torque is computed *completely independently* from the position control above. Changing heading doesn't interfere with flying to the target position.
 
-$$\dot{z}_\psi = a_\psi\, z_\psi + z_{\omega_z}$$
-$$\dot{z}_{\omega_z} = a_{\omega_z}\, z_{\omega_z} - z_\psi$$
+**Closed-loop heading stability:**
 
-which is asymptotically stable for $a_\psi < 0$, $a_{\omega_z} < 0$ (Eq. 53–54, base paper).
+$$\dot{z}_\psi = a_\psi\, z_\psi + z_{\omega_z}, \qquad \dot{z}_{\omega_z} = a_{\omega_z}\, z_{\omega_z} - z_\psi$$
+
+> **📘** These two equations describe how the heading error $z_\psi$ and yaw rate error $z_{\omega_z}$ evolve over time. Since $a_\psi < 0$ and $a_{\omega_z} < 0$, both errors decay to zero — proving the yaw controller is **asymptotically stable** (the drone always ends up facing the right direction).
+
+---
 
 ### 4.7 Full Control Command
 
@@ -179,29 +240,47 @@ At every 20 ms step the controller outputs:
 thrust, (τ_roll, τ_pitch, τ_yaw) = controller.compute_command(state, reference, dt=0.02)
 ```
 
+> **📘** Every 50 times per second, the controller reads the drone's current state (position, velocity, orientation, spin rates) and the desired trajectory, runs all the equations above, and outputs:
+> - `thrust` — how hard the motors should spin overall (in Newtons)
+> - `τ_roll, τ_pitch, τ_yaw` — how much to tilt left/right, forward/backward, and spin the drone
+
+---
+
 ### 4.8 Trajectory Generation
 
-Two reference trajectories are implemented, with parameters matching the base paper's experiments:
-
-**Helical Spiral** (period from paper: $T_{xy} = 6.25$ s, $T_z = 12.5$ s):
+**Helical Spiral** (period times from paper: $T_{xy} = 6.25$ s horizontal, $T_z = 12.5$ s vertical):
 
 $$\omega_{xy} = \frac{2\pi}{6.25},\quad \omega_z = \frac{2\pi}{12.5}$$
 
 $$x_T = 2\sin(\omega_{xy}\,t),\quad y_T = 2\cos(\omega_{xy}\,t),\quad z_T = 1.5 + \sin(\omega_z\,t)$$
 
+> **📘** The drone flies a **corkscrew path** — a circle of radius 2 m in the horizontal (XY) plane that completes every 6.25 s, while the altitude oscillates up and down with a 12.5 s period. These exact period values are taken from the paper's Fig. 4 experiment.
+> - $\sin(\omega_{xy} t)$ and $\cos(\omega_{xy} t)$ trace the circle (90° phase shift between X and Y = circular motion)
+> - $\sin(\omega_z t)$ makes altitude go up and down smoothly
+
 **3D Figure-8 (Lemniscate):**
 
 $$\omega = \frac{2\pi}{9},\quad x_T = 2.5\sin(\omega t),\quad y_T = 2.5\sin(2\omega t),\quad z_T = 2.2 + 0.6\cos(\omega t)$$
 
-Full position, velocity, and acceleration references (and their derivatives) are passed to the backstepping controller at each step.
+> **📘** The drone traces a **3D figure-8 path**:
+> - X uses frequency $\omega$, Y uses frequency $2\omega$ (twice as fast) — this Lissajous pattern creates the figure-8 shape
+> - Z oscillates gently with $0.6\cos(\omega t)$ to give it a 3D twist
+> - The full path repeats every 9 seconds
+
+---
 
 ### 4.9 2nd-Order Reference Filter (Bridge Mode)
-
-When running via the WebSocket bridge, a smooth 2nd-order reference filter (time constant $\tau = 0.8$ s) generates $C^2$-continuous position references from a step-changing setpoint, as required by the backstepping derivation:
 
 $$\ddot{x}_{ref} = \frac{x_{target} - x_{ref} - 2\tau\,\dot{x}_{ref}}{\tau^2}$$
 
 $$\dot{x}_{ref} \leftarrow \dot{x}_{ref} + \ddot{x}_{ref}\,\Delta t, \qquad x_{ref} \leftarrow x_{ref} + \dot{x}_{ref}\,\Delta t$$
+
+> **📘 What this means:**
+> When a user types `set_target.py 5 5 10`, the target position changes instantly (a step jump). But the backstepping controller needs a **smooth reference** (it requires the position, velocity, and acceleration of the target at every moment). Feeding it a step jump would cause violent commands.
+>
+> This filter acts like a **smooth spring**: when you move the target, the reference position gently accelerates toward it, reaches a peak speed, then decelerates and stops exactly at the new target — with no sudden jerks.
+> - $\tau = 0.8$ s = the **time constant** — smaller = faster response, larger = smoother but slower
+> - The filter is updated every timestep ($\Delta t$) by integrating acceleration → velocity → position
 
 ---
 
