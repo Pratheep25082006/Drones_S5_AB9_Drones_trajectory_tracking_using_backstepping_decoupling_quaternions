@@ -37,18 +37,31 @@ class BacksteppingController:
         position_error = self._sub(reference.position, state.position)
         velocity_error = self._sub(reference.velocity, state.velocity)
 
-        desired_acceleration = self._add(
+        desired_acc_raw = self._add(
             reference.acceleration,
             self._scale(position_error, self.k_position),
             self._scale(velocity_error, self.k_velocity),
         )
+
+        # Cap horizontal acceleration to prevent extreme tilt flips (Max Tilt Safety Capping)
+        max_horiz_acc = 5.0  # m/s^2
+        ax, ay, az = desired_acc_raw
+        horiz_norm = sqrt(ax * ax + ay * ay)
+        if horiz_norm > max_horiz_acc:
+            ax = (ax / horiz_norm) * max_horiz_acc
+            ay = (ay / horiz_norm) * max_horiz_acc
+
+        desired_acceleration = (ax, ay, az)
 
         thrust_vector = self._add(
             (0.0, 0.0, self.mass * self.gravity),
             self._scale(desired_acceleration, self.mass),
         )
 
-        thrust = max(0.0, self._norm(thrust_vector))
+        # Thrust physical actuator saturation (Max 2.5x hover thrust)
+        max_thrust = 2.5 * self.mass * self.gravity
+        thrust = max(0.0, min(max_thrust, self._norm(thrust_vector)))
+
         desired_direction = self._normalize(thrust_vector) if thrust > 1e-6 else (0.0, 0.0, 1.0)
         actual_direction = self._thrust_direction(state.quaternion)
 
@@ -63,6 +76,7 @@ class BacksteppingController:
             yaw_torque - self.k_rate * state.angular_rate[2],
         )
         return thrust, torques
+
 
 
     @staticmethod

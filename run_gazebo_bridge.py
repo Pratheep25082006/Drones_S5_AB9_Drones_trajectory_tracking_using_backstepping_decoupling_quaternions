@@ -8,8 +8,16 @@ import threading
 import time
 import http.server
 import socketserver
+import socket
+import struct
 import websockets
-import dronekit_sitl
+
+try:
+    import dronekit_sitl
+except ImportError:
+    dronekit_sitl = None
+
+
 
 from quadrotor_controller import (
     BacksteppingController,
@@ -41,7 +49,12 @@ latest_telemetry = {
 connected_clients = set()
 
 
-def get_reference(t: float, mode: str) -> ControllerReference:
+ref_filter_pos = [0.0, 0.0, 0.0]
+ref_filter_vel = [0.0, 0.0, 0.0]
+
+
+def get_reference(t: float, mode: str, dt: float = 0.02) -> ControllerReference:
+    global ref_filter_pos, ref_filter_vel
     if mode == "helix":
         w_xy = 2.0 * math.pi / 6.25
         w_z = 2.0 * math.pi / 12.5
@@ -55,10 +68,40 @@ def get_reference(t: float, mode: str) -> ControllerReference:
         ay = -2.0 * (w_xy ** 2) * math.sin(w_xy * t)
         az = -0.5 * (w_z ** 2) * math.sin(w_z * t)
         heading = 0.5 * math.sin(w_z * t)
+        ref_filter_pos = [px, py, pz]
         return ControllerReference((px, py, pz), (vx, vy, vz), (ax, ay, az), heading)
     else:
-        tx, ty, tz = latest_telemetry.get("custom_target", [1.0, 1.0, 2.0])
-        return ControllerReference((tx, ty, tz), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.0)
+        # Smooth 2nd order Low Pass Reference Trajectory Filter (Paper Section IV)
+        target_pos = latest_telemetry.get("custom_target", [1.0, 1.0, 2.0])
+        tau = 0.8  # Filter time constant (seconds)
+
+        ax_ref = (target_pos[0] - ref_filter_pos[0] - 2.0 * tau * ref_filter_vel[0]) / (tau * tau)
+        ay_ref = (target_pos[1] - ref_filter_pos[1] - 2.0 * tau * ref_filter_vel[1]) / (tau * tau)
+        az_ref = (target_pos[2] - ref_filter_pos[2] - 2.0 * tau * ref_filter_vel[2]) / (tau * tau)
+
+        # Cap maximum reference acceleration for flight safety
+        max_ref_a = 4.0
+        a_norm = math.sqrt(ax_ref**2 + ay_ref**2 + az_ref**2)
+        if a_norm > max_ref_a:
+            ax_ref = (ax_ref / a_norm) * max_ref_a
+            ay_ref = (ay_ref / a_norm) * max_ref_a
+            az_ref = (az_ref / a_norm) * max_ref_a
+
+        ref_filter_vel[0] += ax_ref * dt
+        ref_filter_vel[1] += ay_ref * dt
+        ref_filter_vel[2] += az_ref * dt
+
+        ref_filter_pos[0] += ref_filter_vel[0] * dt
+        ref_filter_pos[1] += ref_filter_vel[1] * dt
+        ref_filter_pos[2] += ref_filter_vel[2] * dt
+
+        return ControllerReference(
+            (ref_filter_pos[0], ref_filter_pos[1], ref_filter_pos[2]),
+            (ref_filter_vel[0], ref_filter_vel[1], ref_filter_vel[2]),
+            (ax_ref, ay_ref, az_ref),
+            0.0,
+        )
+
 
 
 
@@ -116,21 +159,36 @@ def control_loop_thread(args):
 
     sitl = None
     conn_str = args.connect
-    if not conn_str:
-        print("[Bridge] No connection string provided. Booting local ArduPilot SITL...")
-        sitl = dronekit_sitl.start_default()
-        conn_str = sitl.connection_string()
-        print(f"[Bridge] ArduPilot SITL running on {conn_str}")
+    bridge = None
 
-    bridge = SITLBridge(connection_string=conn_str)
+    if conn_str:
+        if conn_str.lower() == "sitl" and dronekit_sitl is not None:
+            try:
+                print("[Bridge] Booting local ArduPilot SITL...")
+                sitl = dronekit_sitl.start_default()
+                conn_str = sitl.connection_string()
+                print(f"[Bridge] ArduPilot SITL running on {conn_str}")
+            except Exception as e:
+                print(f"[Bridge Note] SITL boot skipped: {e}")
+                sitl = None
+
+        if conn_str and conn_str.lower() != "sitl":
+            try:
+                bridge = SITLBridge(connection_string=conn_str)
+                bridge.connect(timeout=5.0)
+                latest_telemetry["connection"] = f"Connected ({conn_str})"
+                bridge.set_mode("GUIDED")
+                bridge.arm_vehicle(True)
+                latest_telemetry["status"] = "Armed & Controlling (GUIDED)"
+            except Exception as e:
+                print(f"[Bridge Note] MAVLink connection skipped: {e}")
+                bridge = None
+    else:
+        latest_telemetry["connection"] = "Pure Simulation Mode (Active)"
+        latest_telemetry["status"] = "Running 3D Physics Simulation"
+
 
     try:
-        bridge.connect(timeout=15.0)
-        latest_telemetry["connection"] = f"Connected ({conn_str})"
-        bridge.set_mode("GUIDED")
-        bridge.arm_vehicle(True)
-        latest_telemetry["status"] = "Armed & Controlling (GUIDED)"
-
         state = ControllerState(
             position=(0.0, 0.0, 0.0),
             velocity=(0.0, 0.0, 0.0),
@@ -140,14 +198,12 @@ def control_loop_thread(args):
 
         step = 0
         dt = args.dt
-        start_t = time.time()
 
         while True:
             t = step * dt
-            ref = get_reference(t, latest_telemetry["mode"])
+            ref = get_reference(t, latest_telemetry["mode"], dt=dt)
 
-            # Receive MAVLink telemetry if connected to external SITL
-            if args.connect:
+            if bridge:
                 veh_state = bridge.receive_mavlink_state(
                     VehicleState(state.position, state.velocity, state.quaternion, state.angular_rate)
                 )
@@ -159,14 +215,15 @@ def control_loop_thread(args):
                 )
 
             thrust, torques = controller.compute_command(state, ref, dt=dt)
-            target = bridge.build_attitude_target(
-                thrust=thrust,
-                roll=0.0,
-                pitch=0.0,
-                yaw=0.0,
-                yaw_rate=torques[2],
-            )
-            bridge.send_attitude_target(target, quaternion=state.quaternion)
+            if bridge:
+                target = bridge.build_attitude_target(
+                    thrust=thrust,
+                    roll=0.0,
+                    pitch=0.0,
+                    yaw=0.0,
+                    yaw_rate=torques[2],
+                )
+                bridge.send_attitude_target(target, quaternion=state.quaternion)
 
             pos_err = math.sqrt(sum((state.position[i] - ref.position[i])**2 for i in range(3)))
 
@@ -183,8 +240,8 @@ def control_loop_thread(args):
                 "error": round(pos_err, 3),
             })
 
-            if not args.connect:
-                state = update_simulation_physics(state, thrust, torques, dt)
+            # Update local simulation state for next iteration
+            state = update_simulation_physics(state, thrust, torques, dt)
 
             step += 1
             time.sleep(dt)
@@ -193,9 +250,48 @@ def control_loop_thread(args):
         print(f"[Bridge Error] {e}")
         latest_telemetry["status"] = f"Error: {e}"
     finally:
-        bridge.disconnect()
+        if bridge:
+            bridge.disconnect()
         if sitl:
             sitl.stop()
+
+
+
+def euler_from_quaternion(q):
+    w, x, y, z = q
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * (w * y - z * x)
+    sinp = max(-1.0, min(1.0, sinp))
+    pitch = math.asin(sinp)
+
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return roll, pitch, yaw
+
+
+def sync_native_gazebo_thread():
+    """Syncs 6-DOF drone motion to Native Gazebo UDP server at 30 Hz."""
+    print("[INFO] Native Gazebo UDP Pose Streamer started on port 9090.")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    target_addr = ("127.0.0.1", 9090)
+
+    while True:
+        time.sleep(0.03)
+        pos = latest_telemetry.get("pos", [0.0, 0.0, 0.2])
+        quat = latest_telemetry.get("quat", [1.0, 0.0, 0.0, 0.0])
+        roll, pitch, yaw = euler_from_quaternion(quat)
+
+        try:
+            packet = struct.pack("ffffff", float(pos[0]), float(pos[1]), float(pos[2]), float(roll), float(pitch), float(yaw))
+            sock.sendto(packet, target_addr)
+        except Exception:
+            pass
+
+
 
 
 async def ws_handler(websocket):
@@ -235,16 +331,25 @@ def start_http_server(port=8080):
             pass
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    with socketserver.TCPServer(("", port), QuietHandler) as httpd:
-        print(f"[HTTP] Gazebo 3D Web Visualizer available at http://127.0.0.1:{port}/gazebo_visualizer.html")
-        httpd.serve_forever()
+    socketserver.TCPServer.allow_reuse_address = True
+    try:
+        with socketserver.TCPServer(("127.0.0.1", port), QuietHandler) as httpd:
+            print(f"[HTTP] Gazebo 3D Web Visualizer available at http://127.0.0.1:{port}/gazebo_visualizer.html")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"[HTTP Note] Server port {port}: {e}")
 
 
 async def async_main(args):
-    # Start WebSocket Server
-    ws_server = await websockets.serve(ws_handler, "127.0.0.1", 8081)
-    print("[WebSocket] Bridge broadcasting telemetry on ws://127.0.0.1:8081")
-    await broadcast_loop()
+    # Start WebSocket Server with fallback
+    try:
+        ws_server = await websockets.serve(ws_handler, "127.0.0.1", 8081)
+        print("[WebSocket] Bridge broadcasting telemetry on ws://127.0.0.1:8081")
+        await broadcast_loop()
+    except Exception as e:
+        print(f"[WebSocket Note] {e}")
+        await broadcast_loop()
+
 
 
 def main():
@@ -258,9 +363,14 @@ def main():
     t_control = threading.Thread(target=control_loop_thread, args=(args,), daemon=True)
     t_control.start()
 
+    # Start Native Gazebo Pose Synchronization Thread
+    t_sync = threading.Thread(target=sync_native_gazebo_thread, daemon=True)
+    t_sync.start()
+
     # Start HTTP Server Thread
     t_http = threading.Thread(target=start_http_server, args=(args.port,), daemon=True)
     t_http.start()
+
 
     # Run Asyncio event loop for WebSockets
     try:
