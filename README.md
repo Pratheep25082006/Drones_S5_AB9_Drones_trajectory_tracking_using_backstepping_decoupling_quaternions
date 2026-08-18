@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://intranet.cb.amrita.edu/newsletter/bioinvasion" alt="Amrita Vishwa Vidyapeetham" width="300">
+  <img src="assets/amrita_logo.png" alt="Amrita Vishwa Vidyapeetham" width="60%">
 </p>
 
 <h1 align="center">Quadrotor Backstepping Trajectory Tracking Control</h1>
