@@ -11,6 +11,14 @@
 
 ---
 
+## Project Guide
+
+| Role | Name | Email |
+|---|---|---|
+| 👨‍🏫 Faculty Supervisor | **Prof. S. Sunil Kumar** | [s_sunilkumar@cb.amrita.edu](mailto:s_sunilkumar@cb.amrita.edu) |
+
+---
+
 ## Team Members
 
 | S. No. | Name | Roll Number | Email |
