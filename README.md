@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/5/5d/Amrita-vishwa-vidyapeetham-color-logo.svg/320px-Amrita-vishwa-vidyapeetham-color-logo.svg.png" alt="Amrita Vishwa Vidyapeetham" width="300">
+  <img src="https://intranet.cb.amrita.edu/newsletter/bioinvasion" alt="Amrita Vishwa Vidyapeetham" width="300">
 </p>
 
 <h1 align="center">Quadrotor Backstepping Trajectory Tracking Control</h1>
@@ -23,11 +23,11 @@
 
 | S. No. | Name | Roll Number | Email |
 |---:|---|---|---|
-| 1 | Kallam Pratheep Reddy | CB.SC.U4AIE24027 | kallampratheepreddy72@gmail.com |
-| 2 | Chaithanya Gnambiar | CB.SC.U4AIE24012 | — |
-| 3 | Surabhi Saha | CB.SC.U4AIE24055 | — |
-| 4 | Anakha | CB.SC.U4AIE24003 | — |
-| 5 | Mahendra Mula | CB.SC.U4AIE24035 | — |
+| 1 | Kallam Pratheep Reddy | CB.SC.U4AIE24021 | kallampratheepreddy72@gmail.com |
+| 2 | Chaithanya G Nambiar | CB.SC.U4AIE24013 | — |
+| 3 | Surabhi Saha | CB.SC.U4AIE24057 | — |
+| 4 | Anakha | CB.SC.U4AIE24006 | — |
+| 5 | Mahendra Mula | CB.SC.U4AIE24032 | — |
 
 ---
 
