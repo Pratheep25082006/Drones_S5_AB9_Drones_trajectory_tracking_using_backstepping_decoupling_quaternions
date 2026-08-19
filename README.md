@@ -94,7 +94,7 @@ $$\dot{q} = \frac{1}{2} Q(q) \begin{bmatrix} \omega \\ 0 \end{bmatrix}$$
 
 > **📘 What this means:**
 > A **quaternion** $q = (w, x, y, z)$ is a 4-number way to describe how the drone is tilted in 3D space, without the "gimbal lock" problem that Euler angles (roll/pitch/yaw) have.
-> This formula says: *"The rate at which the drone's orientation is changing equals half the current orientation multiplied by the angular velocity $\omega$."*
+> This formula says: *"The rate at which the drone's orientation is changing equals half the current orientation multiplied by the angular velocity  $\omega$ ."*
 > In simple terms — if the drone is spinning, this tells us how the quaternion changes every moment to stay up-to-date with the rotation.
 > - $\omega$ = the drone's spin rate (how fast it rotates around each axis)
 > - $Q(q)$ = a matrix built from the current quaternion that combines the rotation math
