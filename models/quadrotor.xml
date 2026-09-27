@@ -1,0 +1,187 @@
+<mujoco model="quadrotor_backstepping_world">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight ambient="0.4 0.4 0.45" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2"/>
+    <rgba fog="0.7 0.82 0.95 1"/>
+    <global azimuth="135" elevation="-22"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <!-- Sky & Terrains -->
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.4 0.65 0.9" rgb2="0.8 0.88 0.98" width="512" height="512"/>
+    <texture name="grass_tex" type="2d" builtin="checker" width="512" height="512" rgb1="0.22 0.38 0.18" rgb2="0.18 0.32 0.14"/>
+    <material name="grass_mat" texture="grass_tex" texrepeat="50 50" reflectance="0.05" roughness="0.9"/>
+    <texture name="tarmac_tex" type="2d" builtin="checker" width="512" height="512" rgb1="0.25 0.25 0.27" rgb2="0.2 0.2 0.22"/>
+    <material name="tarmac_mat" texture="tarmac_tex" texrepeat="10 10" reflectance="0.15"/>
+    
+    <!-- Arena Materials -->
+    <material name="concrete_mat" rgba="0.6 0.62 0.65 1" roughness="0.7"/>
+    <material name="building_mat" rgba="0.3 0.35 0.42 1" reflectance="0.3" shininess="0.5"/>
+    <material name="building_light" rgba="0.85 0.85 0.9 1" reflectance="0.2"/>
+    <material name="helipad_yellow" rgba="0.95 0.8 0.1 1" shininess="0.8"/>
+    <material name="helipad_white" rgba="0.95 0.95 0.95 1"/>
+    <material name="helipad_dark" rgba="0.18 0.18 0.2 1"/>
+    <material name="gate_orange" rgba="1.0 0.4 0.05 1" shininess="0.9"/>
+    <material name="gate_cyan" rgba="0.0 0.85 1.0 1" shininess="0.9"/>
+    <material name="pylon_stripe1" rgba="0.9 0.2 0.15 1"/>
+    
+    <!-- Drone Materials -->
+    <material name="carbon_fiber" rgba="0.12 0.13 0.15 1" specular="0.6" shininess="0.8"/>
+    <material name="canopy_mat" rgba="0.05 0.6 0.9 0.85" specular="1.0" shininess="0.9"/>
+    <material name="arm_mat" rgba="0.2 0.2 0.22 1" specular="0.4"/>
+    <material name="motor_mat" rgba="0.15 0.15 0.18 1" specular="0.8"/>
+    <material name="prop_front" rgba="0.0 0.7 1.0 0.7"/>
+    <material name="prop_rear" rgba="1.0 0.25 0.25 0.7"/>
+    <material name="skid_mat" rgba="0.75 0.75 0.78 1"/>
+    <material name="target_glow" rgba="1.0 0.2 0.3 0.65"/>
+  </asset>
+
+  <worldbody>
+    <!-- Ground & Sun Lighting -->
+    <geom name="ground" type="plane" size="100 100 0.1" material="grass_mat"/>
+    <light name="sun" directional="true" pos="15 10 30" dir="-0.4 -0.3 -1" castshadow="true" diffuse="0.9 0.88 0.85" specular="0.3 0.3 0.3"/>
+    <light name="fill_light" directional="true" pos="-15 -10 20" dir="0.4 0.3 -0.8" castshadow="false" diffuse="0.3 0.35 0.4"/>
+
+    <!-- Dynamic Mocap Target Beacon -->
+    <body name="target_marker" mocap="true" pos="0 0 2">
+      <geom name="target_sphere" type="sphere" size="0.12" material="target_glow" conaffinity="0" contype="0"/>
+      <geom name="target_ring" type="cylinder" size="0.22 0.01" material="target_glow" conaffinity="0" contype="0"/>
+    </body>
+
+    <!-- Central Runway / Helipad Zone -->
+    <geom name="tarmac_apron" type="box" pos="0 0 0.005" size="10 10 0.005" material="tarmac_mat"/>
+    <geom name="helipad_circle" type="cylinder" pos="0 0 0.01" size="3.5 0.005" material="helipad_dark"/>
+    <geom name="helipad_outer_ring" type="cylinder" pos="0 0 0.012" size="3.4 0.002" material="helipad_yellow"/>
+    <geom name="helipad_inner_ring" type="cylinder" pos="0 0 0.014" size="3.1 0.003" material="helipad_dark"/>
+    
+    <!-- Helipad 'H' Marking -->
+    <geom name="h_bar_left" type="box" pos="-0.9 0 0.016" size="0.18 1.1 0.002" material="helipad_white"/>
+    <geom name="h_bar_right" type="box" pos="0.9 0 0.016" size="0.18 1.1 0.002" material="helipad_white"/>
+    <geom name="h_bar_center" type="box" pos="0 0 0.016" size="0.72 0.18 0.002" material="helipad_white"/>
+
+    <!-- Flight Arena Environment: Obstacle Towers & Buildings -->
+    <!-- Tower North-East -->
+    <body name="tower_ne" pos="8 8 0">
+      <geom name="tower_ne_bldg" type="box" pos="0 0 3.5" size="1.5 1.5 3.5" material="building_mat"/>
+      <geom name="tower_ne_roof" type="box" pos="0 0 7.2" size="1.3 1.3 0.2" material="concrete_mat"/>
+      <geom name="tower_ne_antenna" type="cylinder" pos="0 0 8.2" size="0.05 0.8" material="skid_mat"/>
+      <geom name="tower_ne_light" type="sphere" pos="0 0 9.05" size="0.1" material="pylon_stripe1"/>
+    </body>
+
+    <!-- Tower North-West -->
+    <body name="tower_nw" pos="-8 8 0">
+      <geom name="tower_nw_bldg" type="box" pos="0 0 5.0" size="1.8 1.8 5.0" material="building_mat"/>
+      <geom name="tower_nw_stripe" type="box" pos="0 0 8.0" size="1.82 1.82 0.3" material="building_light"/>
+      <geom name="tower_nw_roof" type="box" pos="0 0 10.2" size="1.5 1.5 0.2" material="concrete_mat"/>
+    </body>
+
+    <!-- Tower South-West -->
+    <body name="tower_sw" pos="-8 -8 0">
+      <geom name="tower_sw_bldg" type="box" pos="0 0 4.0" size="1.6 1.6 4.0" material="building_mat"/>
+      <geom name="tower_sw_roof" type="box" pos="0 0 8.15" size="1.4 1.4 0.15" material="concrete_mat"/>
+    </body>
+
+    <!-- Tower South-East -->
+    <body name="tower_se" pos="8 -8 0">
+      <geom name="tower_se_bldg" type="box" pos="0 0 6.0" size="2.0 2.0 6.0" material="building_mat"/>
+      <geom name="tower_se_roof" type="box" pos="0 0 12.2" size="1.7 1.7 0.2" material="concrete_mat"/>
+    </body>
+
+    <!-- Drone Racing / Slalom Waypoint Gates -->
+    <!-- Gate 1 (East) -->
+    <body name="gate_east" pos="4.5 0 0">
+      <geom name="gate_e_post_l" type="cylinder" pos="0 -1.6 1.8" size="0.07 1.8" material="gate_orange"/>
+      <geom name="gate_e_post_r" type="cylinder" pos="0 1.6 1.8" size="0.07 1.8" material="gate_orange"/>
+      <geom name="gate_e_top" type="box" pos="0 0 3.6" size="0.07 1.67 0.07" material="gate_orange"/>
+    </body>
+
+    <!-- Gate 2 (North) -->
+    <body name="gate_north" pos="0 4.5 0">
+      <geom name="gate_n_post_l" type="cylinder" pos="-1.6 0 2.0" size="0.07 2.0" material="gate_cyan"/>
+      <geom name="gate_n_post_r" type="cylinder" pos="1.6 0 2.0" size="0.07 2.0" material="gate_cyan"/>
+      <geom name="gate_n_top" type="box" pos="0 0 4.0" size="1.67 0.07 0.07" material="gate_cyan"/>
+    </body>
+
+    <!-- Gate 3 (West) -->
+    <body name="gate_west" pos="-4.5 0 0">
+      <geom name="gate_w_post_l" type="cylinder" pos="0 -1.6 2.2" size="0.07 2.2" material="gate_orange"/>
+      <geom name="gate_w_post_r" type="cylinder" pos="0 1.6 2.2" size="0.07 2.2" material="gate_orange"/>
+      <geom name="gate_w_top" type="box" pos="0 0 4.4" size="0.07 1.67 0.07" material="gate_orange"/>
+    </body>
+
+    <!-- Gate 4 (South) -->
+    <body name="gate_south" pos="0 -4.5 0">
+      <geom name="gate_s_post_l" type="cylinder" pos="-1.6 0 1.8" size="0.07 1.8" material="gate_cyan"/>
+      <geom name="gate_s_post_r" type="cylinder" pos="1.6 0 1.8" size="0.07 1.8" material="gate_cyan"/>
+      <geom name="gate_s_top" type="box" pos="0 0 3.6" size="1.67 0.07 0.07" material="gate_cyan"/>
+    </body>
+
+    <!-- Boundary Safety Pylons -->
+    <geom name="pylon_1" type="cylinder" pos="12 12 0.75" size="0.15 0.75" material="pylon_stripe1"/>
+    <geom name="pylon_2" type="cylinder" pos="-12 12 0.75" size="0.15 0.75" material="pylon_stripe1"/>
+    <geom name="pylon_3" type="cylinder" pos="-12 -12 0.75" size="0.15 0.75" material="pylon_stripe1"/>
+    <geom name="pylon_4" type="cylinder" pos="12 -12 0.75" size="0.15 0.75" material="pylon_stripe1"/>
+
+    <!-- Static Obstacle in Drone Flight Path -->
+    <geom name="flight_obstacle" type="cylinder" pos="0.5 1.8 1.7" size="0.3 0.8" material="pylon_stripe1"/>
+
+    <!-- Quadrotor Free Body -->
+    <body name="quadrotor" pos="0 0 0.15">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="1.5" fullinertia="0.03 0.03 0.05 0 0 0"/>
+
+      <!-- Tracking Site -->
+      <site name="center_site" pos="0 0 0" size="0.01"/>
+
+      <!-- Fuselage Core Body -->
+      <geom name="fuselage" type="box" pos="0 0 0" size="0.12 0.10 0.035" material="carbon_fiber"/>
+      <geom name="canopy" type="ellipsoid" pos="0.01 0 0.035" size="0.09 0.07 0.035" material="canopy_mat"/>
+      
+      <!-- Forward Camera Pod -->
+      <geom name="nose_camera" type="cylinder" pos="0.13 0 0.01" zaxis="1 0 0" size="0.022 0.02" material="motor_mat"/>
+      <geom name="lens" type="sphere" pos="0.152 0 0.01" size="0.016" material="canopy_mat"/>
+
+      <!-- Landing Skids -->
+      <!-- Left Skid -->
+      <geom name="skid_leg_fl" type="cylinder" pos="0.08 0.09 -0.05" zaxis="0 0.3 -1" size="0.007 0.06" material="skid_mat"/>
+      <geom name="skid_leg_rl" type="cylinder" pos="-0.08 0.09 -0.05" zaxis="0 0.3 -1" size="0.007 0.06" material="skid_mat"/>
+      <geom name="skid_rail_l" type="capsule" pos="0 0.11 -0.095" zaxis="1 0 0" size="0.008 0.14" material="skid_mat"/>
+      <!-- Right Skid -->
+      <geom name="skid_leg_fr" type="cylinder" pos="0.08 -0.09 -0.05" zaxis="0 -0.3 -1" size="0.007 0.06" material="skid_mat"/>
+      <geom name="skid_leg_rr" type="cylinder" pos="-0.08 -0.09 -0.05" zaxis="0 -0.3 -1" size="0.007 0.06" material="skid_mat"/>
+      <geom name="skid_rail_r" type="capsule" pos="0 -0.11 -0.095" zaxis="1 0 0" size="0.008 0.14" material="skid_mat"/>
+
+      <!-- Arm 1: Front-Right (+X, -Y) -->
+      <geom name="arm1" type="box" pos="0.12 -0.12 0" euler="0 0 -45" size="0.14 0.016 0.012" material="arm_mat"/>
+      <geom name="motor1" type="cylinder" pos="0.22 -0.22 0.025" size="0.032 0.022" material="motor_mat"/>
+      <geom name="rotor1" type="cylinder" pos="0.22 -0.22 0.05" size="0.14 0.003" material="prop_front"/>
+
+      <!-- Arm 2: Front-Left (+X, +Y) -->
+      <geom name="arm2" type="box" pos="0.12 0.12 0" euler="0 0 45" size="0.14 0.016 0.012" material="arm_mat"/>
+      <geom name="motor2" type="cylinder" pos="0.22 0.22 0.025" size="0.032 0.022" material="motor_mat"/>
+      <geom name="rotor2" type="cylinder" pos="0.22 0.22 0.05" size="0.14 0.003" material="prop_front"/>
+
+      <!-- Arm 3: Rear-Left (-X, +Y) -->
+      <geom name="arm3" type="box" pos="-0.12 0.12 0" euler="0 0 -45" size="0.14 0.016 0.012" material="arm_mat"/>
+      <geom name="motor3" type="cylinder" pos="-0.22 0.22 0.025" size="0.032 0.022" material="motor_mat"/>
+      <geom name="rotor3" type="cylinder" pos="-0.22 0.22 0.05" size="0.14 0.003" material="prop_rear"/>
+
+      <!-- Arm 4: Rear-Right (-X, -Y) -->
+      <geom name="arm4" type="box" pos="-0.12 -0.12 0" euler="0 0 45" size="0.14 0.016 0.012" material="arm_mat"/>
+      <geom name="motor4" type="cylinder" pos="-0.22 -0.22 0.025" size="0.032 0.022" material="motor_mat"/>
+      <geom name="rotor4" type="cylinder" pos="-0.22 -0.22 0.05" size="0.14 0.003" material="prop_rear"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Direct Force & Torque Actuators on center site -->
+    <motor name="thrust" site="center_site" gear="0 0 1 0 0 0"/>
+    <general name="torque_x" site="center_site" gear="0 0 0 1 0 0"/>
+    <general name="torque_y" site="center_site" gear="0 0 0 0 1 0"/>
+    <general name="torque_z" site="center_site" gear="0 0 0 0 0 1"/>
+  </actuator>
+</mujoco>
+
