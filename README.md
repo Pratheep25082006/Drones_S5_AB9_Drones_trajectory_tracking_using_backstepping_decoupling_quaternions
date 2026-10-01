@@ -148,7 +148,7 @@ $$
 $$
 
 $$
-m\dot{v} = m g\,\hat{e}_3 + T
+m\dot{v} = m g\\hat{e}_3 + T
 $$
 
 Description: these equations describe the motion of the vehicle through space.
