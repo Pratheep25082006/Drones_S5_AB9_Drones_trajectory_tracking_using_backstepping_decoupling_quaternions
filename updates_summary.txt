@@ -1,0 +1,89 @@
+================================================================================
+          PROJECT WORK PROGRESS & SYSTEM UPDATES SUMMARY
+          Repository: Pratheep25082006/Drones_S5_AB9_Drones_trajectory_tracking
+          Date: October 5, 2026
+================================================================================
+
+1. OVERVIEW OF COMPLETED TASKS
+--------------------------------------------------------------------------------
+Today's development focused on sensor noise modeling, Kalman filter state estimation,
+3D urban city environment creation, real-time reactive obstacle avoidance (LiDAR),
+visual cleanup, telemetry display positioning, and exact parity between the MuJoCo
+and gym-pybullet-drones physics engines.
+
+
+2. SENSOR NOISE & DISCRETE KALMAN FILTER IMPLEMENTATION
+--------------------------------------------------------------------------------
+- Sensor Noise Model (SensorNoiseModel):
+  * Added realistic Gaussian measurement noise across position, linear velocity,
+    and angular body rate measurements.
+  * Synchronized standard deviations across both MuJoCo and PyBullet engines:
+      - Position standard deviation:  std_pos = 0.05 m (5 cm)
+      - Velocity standard deviation:  std_vel = 0.08 m/s
+      - Body rate standard deviation: std_rate = 0.02 rad/s
+  * Allows toggling via CLI flags: --noise / --no-noise.
+
+- Discrete Kalman Filter State Estimator (QuadrotorStateEstimator):
+  * Implemented linear state-space prediction and update steps (F, B, H, Q, R, P).
+  * Smooths out sensor noise down to sub-centimeter estimation accuracy (~0.4 to 1.2 cm error).
+  * Feeds clean state estimates into the Backstepping tracking controller.
+  * Allows comparison against raw noisy feedback via CLI: --filter / --no-filter.
+
+
+3. 3D URBAN CITY ENVIRONMENT & SENSING
+--------------------------------------------------------------------------------
+- Built matching 3D Urban City Architecture across both simulation engines:
+  * Central Helipad Plaza and asphalt avenue crossroads.
+  * 4 High-Rise Perimeter Skyscrapers (Metropolitan, Financial, Tech, and Civic towers).
+  * Urban corridor building blocks challenging flight pathways.
+  * Trees and street furniture positioned along avenue perimeters.
+
+- 10-Beam Omnidirectional LiDAR Sensor:
+  * 8 horizontal beams (cardinal + diagonal azimuths) + 2 vertical beams (zenith/nadir).
+  * Fast batch raycasting with 6.0m - 8.0m detection range.
+  * Real-time clearance and proximity detection.
+
+- Reactive Obstacle Avoidance Engine (ReactiveObstacleAvoider):
+  * Artificial Potential Field (APF) repulsive velocity generator.
+  * Lateral detour / tangential circulation around obstacles.
+  * Smooth waypoint replanning if building blocks obstruct the desired path.
+
+
+4. VISUAL CLEANUP & SCREEN HUD POSITIONING
+--------------------------------------------------------------------------------
+- Removed Green/Yellow Ray Lines across Viewports:
+  * In PyBullet: Disabled laser debug line rendering (draw_debug_lines=False),
+    eliminating all green and red raycast lines between drone and buildings.
+  * In MuJoCo: Disabled viewer rangefinder rendering flag (mjVIS_RANGEFINDER=False),
+    keeping the 3D viewport clean.
+  * Fixed AttributeError related to mjVIS_SENSOR by using the native mjVIS_RANGEFINDER flag.
+
+- Clean Telemetry Display Moved to the Side of Screen:
+  * Replaced screen-blocking text with a sleek, non-intrusive 3-line HUD located
+    at the side corner:
+      Line 1: POS   [Act: (X, Y, Z) | Des: (X, Y, Z)]
+      Line 2: STATE [KF Active | KF Err: ..cm | Noise: ..cm]
+      Line 3: LIDAR [Avoid/Clear | Vel: (Vx, Vy, Vz)]
+  * Standardized terminal telemetry printouts between both engines every 0.5s.
+
+
+5. PYBULLET SPEED TUNING & TRAJECTORY MOTION PARITY
+--------------------------------------------------------------------------------
+- Reduced Flight Speed in PyBullet to match MuJoCo:
+  * Replaced step-jump takeoff with smooth cubic S-curve takeoff (0.08m -> 1.0m over 4s).
+  * Reduced helical spiral and figure-8 velocities to ~0.37 - 0.42 m/s.
+  * Tuned Crazyflie controller gains (k_pos=1.6, k_vel=1.2, k_tilt=2.5, k_yaw=1.8).
+  * Capped repulsive avoidance velocity to 1.0 m/s for stable, smooth flight.
+  * Reset target.txt back to 'auto' mode.
+
+
+6. TEST SUITE & VERIFICATION
+--------------------------------------------------------------------------------
+- Full test suite passed (26 out of 26 tests passing):
+  * test_controller.py (Backstepping math, quaternion decomposition, attitude limits)
+  * test_kalman_filter.py (Noise models, filter convergence, estimation accuracy)
+  * test_obstacle_avoidance.py (LiDAR rays, APF repulsion, lateral detours)
+  * test_mujoco_sim.py (Model loading, tracking, arena structure, Kalman filter)
+  * test_pybullet_sim.py (Aviary initialization, mixer math, filter integration)
+  * test_sitl_bridge.py (MAVLink telemetry parsing and attitude commands)
+================================================================================

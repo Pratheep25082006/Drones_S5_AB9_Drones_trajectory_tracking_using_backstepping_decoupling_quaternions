@@ -4,3 +4,5 @@ __pycache__/
 .vscode/
 *.png
 *.log
+gym_pybullet_drones_repo/
+

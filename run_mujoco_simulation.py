@@ -57,7 +57,17 @@ import mujoco
 import mujoco.viewer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from quadrotor_controller import BacksteppingController, ControllerReference, ControllerState
+from quadrotor_controller import (
+    BacksteppingController,
+    ControllerReference,
+    ControllerState,
+    KalmanFilter,
+    LidarScan,
+    QuadrotorStateEstimator,
+    ReactiveObstacleAvoider,
+    SensorNoiseModel,
+)
+
 
 
 def get_obstacle_distance(m, d, obstacle_geom_name=OBSTACLE_GEOM_NAME, body_name="quadrotor"):
@@ -158,6 +168,13 @@ def main():
     parser = argparse.ArgumentParser(description="MuJoCo Quadrotor Simulation & Trajectory Tracker")
     parser.add_argument("--headless", action="store_true", help="Run headless without 3D viewer")
     parser.add_argument("--duration", type=float, default=0, help="Run duration in seconds (0 for infinite)")
+    parser.add_argument("--noise", dest="noise", action="store_true", default=True, help="Enable sensor measurement noise in MuJoCo (default: True)")
+    parser.add_argument("--no-noise", dest="noise", action="store_false", help="Disable sensor measurement noise")
+    parser.add_argument("--filter", dest="use_filter", action="store_true", default=True, help="Enable Kalman Filter state estimation (default: True)")
+    parser.add_argument("--no-filter", dest="use_filter", action="store_false", help="Disable Kalman Filter (feed raw noisy state to controller)")
+    parser.add_argument("--noise-pos-std", type=float, default=0.05, help="Standard deviation of position noise in meters (default: 0.05m)")
+    parser.add_argument("--noise-vel-std", type=float, default=0.08, help="Standard deviation of velocity noise in m/s (default: 0.08m/s)")
+    parser.add_argument("--noise-rate-std", type=float, default=0.02, help="Standard deviation of angular rate noise in rad/s (default: 0.02 rad/s)")
     args = parser.parse_args()
 
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "quadrotor.xml")
@@ -183,11 +200,39 @@ def main():
     controller = BacksteppingController(mass=1.5, gravity=9.81)
     dt = m.opt.timestep
 
+    # Sensor Noise Model & Kalman Filter State Estimator
+    noise_model = SensorNoiseModel(
+        pos_std=args.noise_pos_std,
+        vel_std=args.noise_vel_std,
+        rate_std=args.noise_rate_std,
+        enabled=args.noise,
+    )
+    estimator = QuadrotorStateEstimator(
+        dt=dt,
+        process_noise_acc=0.5,
+        meas_pos_std=args.noise_pos_std,
+        meas_vel_std=args.noise_vel_std,
+        initial_pos=(0.0, 0.0, 0.20),
+        initial_vel=(0.0, 0.0, 0.0),
+    )
+    avoider = ReactiveObstacleAvoider(
+        safety_distance=0.8,
+        detection_distance=2.2,
+        max_repulsive_speed=2.2,
+    )
+
     # Speed & Acceleration limits matching Gazebo
     MAX_SPEED = 3.5        # Max flight speed in m/s (~12.6 km/h)
     MAX_ACCEL = 1.8        # Max acceleration in m/s²
 
+    noise_status = f"ENABLED (std_pos={args.noise_pos_std}m, std_vel={args.noise_vel_std}m/s)" if args.noise else "DISABLED"
+    filter_status = "KALMAN FILTER ACTIVE" if args.use_filter else "RAW NOISY FEEDBACK (No Filter)"
+
     print(f"[INFO] Model: {model_path}")
+    print(f"[INFO] Sensor Noise: {noise_status}")
+    print(f"[INFO] State Estimation: {filter_status}")
+    print(f"[INFO] LiDAR Sensor: 10-beam Omnidirectional Proximity Active (range=8m)")
+    print(f"[INFO] Obstacle Avoidance: Reactive Potential Field & Lateral Circulation Active")
     print(f"[INFO] Trajectory: 40s Automated Demo (Takeoff -> Helical Spiral -> Figure-8)")
     print(f"[INFO] Physics Rate: {int(1.0/dt)} Hz (dt={dt:.4f}s)")
     print("[INFO] Direct dynamic target sync via: python set_target.py X Y Z\n")
@@ -223,15 +268,39 @@ def main():
         if m.nmocap > 0:
             d.mocap_pos[0] = [ref_pos[0], ref_pos[1], ref_pos[2]]
 
-        # Current state from MuJoCo
-        pos = (float(d.qpos[0]), float(d.qpos[1]), float(d.qpos[2]))
-        vel = (float(d.qvel[0]), float(d.qvel[1]), float(d.qvel[2]))
-        quat = (float(d.qpos[3]), float(d.qpos[4]), float(d.qpos[5]), float(d.qpos[6]))
-        ang_vel = (float(d.qvel[3]), float(d.qvel[4]), float(d.qvel[5]))
+        # Ground-truth state from MuJoCo
+        true_pos = (float(d.qpos[0]), float(d.qpos[1]), float(d.qpos[2]))
+        true_vel = (float(d.qvel[0]), float(d.qvel[1]), float(d.qvel[2]))
+        true_quat = (float(d.qpos[3]), float(d.qpos[4]), float(d.qpos[5]), float(d.qpos[6]))
+        true_ang_vel = (float(d.qvel[3]), float(d.qvel[4]), float(d.qvel[5]))
 
-        state = ControllerState(position=pos, velocity=vel, quaternion=quat, angular_rate=ang_vel)
+        true_state = ControllerState(
+            position=true_pos,
+            velocity=true_vel,
+            quaternion=true_quat,
+            angular_rate=true_ang_vel
+        )
+
+        # 1. Inject sensor measurement noise (GPS/Mocap + IMU)
+        noisy_state = noise_model.apply_noise(true_state)
+
+        # 2. State Estimation: Denoise via Kalman Filter
+        if args.use_filter:
+            feedback_state = estimator.estimate(noisy_state, dt=dt)
+        else:
+            feedback_state = noisy_state
+
+        pos = feedback_state.position
+        vel = feedback_state.velocity
+        quat = feedback_state.quaternion
+        ang_vel = feedback_state.angular_rate
+
+        # Compute instant estimation error metrics
+        noise_err = math.sqrt(sum((noisy_state.position[i] - true_pos[i])**2 for i in range(3)))
+        kf_err = math.sqrt(sum((pos[i] - true_pos[i])**2 for i in range(3)))
+
         ref = ControllerReference(ref_pos, ref_vel, ref_acc, heading)
-        thrust, torques = controller.compute_command(state, ref, dt=dt)
+        thrust, torques = controller.compute_command(feedback_state, ref, dt=dt)
 
         # Smooth Kinematics & Trajectory Generation (matching Gazebo flight dynamics)
         dx = ref_pos[0] - pos[0]
@@ -280,19 +349,35 @@ def main():
             q_z = math.sin(0.5 * heading)
             quat_next = (q_w, roll_desired, pitch_desired, q_z)
 
-        # Obstacle avoidance check
-        obs_dist, obs_pos = get_obstacle_distance(m, d, OBSTACLE_GEOM_NAME, body_name="quadrotor")
-        obstacle_detected = (obs_dist is not None and obs_dist < OBSTACLE_SAFETY_THRESHOLD)
+        # 10-Beam Omnidirectional LiDAR Readings from MuJoCo Rangefinders
+        lidar_ranges = []
+        for i in range(8):
+            r_val = float(d.sensordata[i]) if m.nsensor > i else -1.0
+            lidar_ranges.append(r_val if r_val > 0.0 else 8.0)
+        dist_up = float(d.sensordata[8]) if m.nsensor > 8 and d.sensordata[8] > 0 else 8.0
+        dist_down = float(d.sensordata[9]) if m.nsensor > 9 and d.sensordata[9] > 0 else 8.0
 
-        if obstacle_detected:
-            # Safety stop: halt forward motion, set velocity commands to 0, hold current position
-            new_vx, new_vy, new_vz = 0.0, 0.0, 0.0
-            new_x, new_y, new_z = pos[0], pos[1], pos[2]
-            # Level attitude in hover hold
-            quat_next = (math.cos(0.5 * heading), 0.0, 0.0, math.sin(0.5 * heading))
-            # Set attitude controller to hover reference at current position with 0 velocity
-            hover_ref = ControllerReference(pos, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), heading)
-            thrust, torques = controller.compute_command(state, hover_ref, dt=dt)
+        scan = LidarScan(ranges=lidar_ranges, dist_up=dist_up, dist_down=dist_down)
+        (avoid_vx, avoid_vy, avoid_vz), is_avoiding, avoid_status = avoider.compute_avoidance_velocity(
+            lidar=scan,
+            current_vel=(new_vx, new_vy, new_vz),
+            desired_vel=(new_vx, new_vy, new_vz),
+            heading=heading,
+        )
+
+        if is_avoiding:
+            new_vx, new_vy, new_vz = avoid_vx, avoid_vy, avoid_vz
+            new_x = pos[0] + new_vx * dt
+            new_y = pos[1] + new_vy * dt
+            new_z = max(0.2, pos[2] + new_vz * dt)
+
+            # Bank tilt in direction of avoidance velocity
+            pitch_desired = -0.15 * (new_vx / MAX_SPEED)
+            roll_desired = 0.15 * (new_vy / MAX_SPEED)
+            quat_next = (math.cos(0.5 * heading), roll_desired, pitch_desired, math.sin(0.5 * heading))
+
+            avoid_ref = ControllerReference((new_x, new_y, new_z), (new_vx, new_vy, new_vz), (0.0, 0.0, 0.0), heading)
+            thrust, torques = controller.compute_command(feedback_state, avoid_ref, dt=dt)
 
         # Apply state update & actuators to MuJoCo
         d.qpos[0] = new_x
@@ -317,12 +402,14 @@ def main():
         # Telemetry printout matching Gazebo format every 0.5s (250 steps)
         if step % 250 == 0:
             mode_str = "CUSTOM TARGET" if custom_target else "AUTO TRAJECTORY"
-            status_suffix = f" | [OBSTACLE STOP] Dist: {obs_dist:.2f}m" if obstacle_detected else ""
-            print(f"[{mode_str} t={sim_time:5.1f}s] Pos: ({new_x:5.2f}, {new_y:5.2f}, {new_z:5.2f}m) | Target: ({ref_pos[0]:5.2f}, {ref_pos[1]:5.2f}, {ref_pos[2]:5.2f}m){status_suffix}")
+            min_lidar = scan.min_horizontal_dist
+            status_suffix = f" | [LIDAR {avoid_status}]" if is_avoiding else f" | LiDAR Clear ({min_lidar:.1f}m)"
+            filter_str = f" | KF Err: {kf_err*100:4.1f}cm (Noise: {noise_err*100:4.1f}cm)" if (args.noise and args.use_filter) else ""
+            print(f"[{mode_str} t={sim_time:5.1f}s] Pos: ({new_x:5.2f}, {new_y:5.2f}, {new_z:5.2f}m) | Target: ({ref_pos[0]:5.2f}, {ref_pos[1]:5.2f}, {ref_pos[2]:5.2f}m){filter_str}{status_suffix}")
 
         step += 1
         sim_time += dt
-        return ref_pos, ref_vel
+        return ref_pos, ref_vel, true_pos, noisy_state.position, pos, noise_err, kf_err, scan, is_avoiding, avoid_status
 
     # Headless mode
     if args.headless:
@@ -334,7 +421,7 @@ def main():
                     break
                 time.sleep(dt * 0.5)
         except KeyboardInterrupt:
-            print("\\n[INFO] Headless simulation stopped.")
+            print("\n[INFO] Headless simulation stopped.")
         return
 
     # -----------------------------------------------------------------
@@ -348,20 +435,23 @@ def main():
     print("       - Scroll Wheel: Zoom")
     print("       - Double Click: Center on Drone or Object")
     print("       - Space: Pause / Unpause")
-    print("       - Tab: Toggle Info Overlays\\n")
+    print("       - Tab: Toggle Info Overlays\n")
 
     try:
         with mujoco.viewer.launch_passive(m, d) as viewer:
-            # Set initial camera view
-            viewer.cam.distance = 10.0
-            viewer.cam.azimuth = 135.0
-            viewer.cam.elevation = -22.0
+            # Hide rangefinder lines so screen is clear and clean
+            viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = False
+
+            # Set initial camera view - side-elevation overlooking the drone arena
+            viewer.cam.distance = 9.0
+            viewer.cam.azimuth = 140.0
+            viewer.cam.elevation = -24.0
             viewer.cam.lookat[0] = 0.0
             viewer.cam.lookat[1] = 0.0
-            viewer.cam.lookat[2] = 2.0
+            viewer.cam.lookat[2] = 1.2
 
             print("[INFO] Viewer window active! Fly with set_target.py or let Mission Mode run.")
-            print("[INFO] Press Ctrl+C in terminal or close window to quit.\\n")
+            print("[INFO] Press Ctrl+C in terminal or close window to quit.\n")
 
             last_overlay_time = 0.0
             OVERLAY_REFRESH_INTERVAL = 0.03  # ~30 Hz refresh rate for lightweight GUI overlay
@@ -369,7 +459,7 @@ def main():
             while viewer.is_running():
                 t_start = time.time()
 
-                ref_pos, ref_vel = physics_step()
+                ref_pos, ref_vel, true_pos, noisy_pos, est_pos, noise_err, kf_err, scan, is_avoiding, avoid_status = physics_step()
                 if args.duration > 0 and sim_time >= args.duration:
                     break
 
@@ -380,11 +470,22 @@ def main():
                         f"x={ref_vel[0]:.2f} y={ref_vel[1]:.2f} z={ref_vel[2]:.2f}"
                         if ref_vel is not None else "N/A"
                     )
+                    pos_noisy_str = (
+                        f"x={noisy_pos[0]:.2f} y={noisy_pos[1]:.2f} z={noisy_pos[2]:.2f}"
+                        if noisy_pos is not None else "N/A"
+                    )
+                    pos_est_str = (
+                        f"x={est_pos[0]:.2f} y={est_pos[1]:.2f} z={est_pos[2]:.2f}"
+                        if est_pos is not None else "N/A"
+                    )
+                    filter_lbl = "Kalman Filter (ACTIVE)" if args.use_filter else "DISABLED (Raw Noisy)"
+                    noise_lbl = f"ON (std={args.noise_pos_std}m)" if args.noise else "OFF"
+                    avoid_lbl = f"Avoid ({avoid_status})" if is_avoiding else f"Clear ({scan.min_horizontal_dist:.1f}m)"
+                    filter_lbl = "KF Active" if args.use_filter else "No Filter"
                     overlay_text = (
-                        f"Pos (actual):  x={d.qpos[0]:.2f} y={d.qpos[1]:.2f} z={d.qpos[2]:.2f}\n"
-                        f"Pos (desired): x={ref_pos[0]:.2f} y={ref_pos[1]:.2f} z={ref_pos[2]:.2f}\n"
-                        f"Vel (actual):  x={d.qvel[0]:.2f} y={d.qvel[1]:.2f} z={d.qvel[2]:.2f}\n"
-                        f"Vel (desired): {vel_des_str}"
+                        f"POS [Act: ({d.qpos[0]:.2f}, {d.qpos[1]:.2f}, {d.qpos[2]:.2f}) | Des: ({ref_pos[0]:.2f}, {ref_pos[1]:.2f}, {ref_pos[2]:.2f})]\n"
+                        f"STATE [{filter_lbl} | KF Err: {kf_err*100:.1f}cm | Noise: {noise_err*100:.1f}cm]\n"
+                        f"LIDAR [{avoid_lbl} | Vel: ({d.qvel[0]:.2f}, {d.qvel[1]:.2f}, {d.qvel[2]:.2f}m/s)]"
                     )
                     if hasattr(viewer, 'set_texts'):
                         viewer.set_texts([(mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, overlay_text, "")])
@@ -401,8 +502,9 @@ def main():
                     time.sleep(sleep_rem)
 
     except KeyboardInterrupt:
-        print("\\n[INFO] Simulation stopped by user.")
+        print("\n[INFO] Simulation stopped by user.")
     print("[INFO] MuJoCo simulation finished.")
+
 
 
 if __name__ == "__main__":

@@ -543,36 +543,45 @@ WSL2 Ubuntu
 
 ```
 d:\Drones\
-|
-|-- quadrotor_controller/          Core Python controller package
-|   |-- __init__.py                Public API
-|   |-- controller.py              BacksteppingController and quaternion math
-|   |-- sitl_bridge.py             SITLBridge: MAVLink and simulator bridge
-|
-|-- models/
-|   |-- quadrotor.world            Gazebo 11 SDF world
-|   |-- <mujoco_model>.xml         MuJoCo MJCF quadrotor model
-|
-|-- tests/
-|   |-- test_controller.py         Unit tests for BacksteppingController
-|   |-- test_sitl_bridge.py        Unit tests for SITLBridge
-|
-|-- run_gazebo_simulation.py       Main simulation runner (Windows)
-|-- <mujoco_runner>.py             MuJoCo simulation runner
-|-- run_gazebo_bridge.py           WebSocket telemetry bridge server
-|-- gazebo_visualizer.html         Real-time 3D web telemetry dashboard
-|-- set_target.py                  CLI target setter utility
-|-- launch_gazebo_wsl.py           Launches Gazebo inside WSL2
-|-- run_gazebo.sh                  Bash launcher (inside WSL Ubuntu)
-|
-|-- START_GAZEBO_GUI.bat           One-click Windows launcher
-|-- launch_web_visualizer.bat      One-click web visualizer launcher
-|
-|-- GAZEBO_INSTALLATION_GUIDE.md   Full Gazebo 11 and WSL2 setup guide
-|-- Trajectory_tracking_control... Reference research paper (PDF)
+│
+├── quadrotor_controller/          # Core Python controller package
+│   ├── __init__.py                # Public API
+│   ├── controller.py              # BacksteppingController + quaternion math
+│   ├── kalman_filter.py           # KalmanFilter + SensorNoiseModel + Estimator
+│   ├── obstacle_avoidance.py      # LiDAR Scan Model + Reactive APF Detour
+│   └── sitl_bridge.py             # SITLBridge — MAVLink & simulator bridge
+│
+├── models/
+│   ├── quadrotor.world            # Gazebo 11 SDF world
+│   ├── quadrotor.xml              # MuJoCo 3D City World & LiDAR sensors
+│   └── quadrotor.urdf             # PyBullet 6-DOF Quadrotor URDF
+│
+├── tests/
+│   ├── test_controller.py         # Unit tests — BacksteppingController
+│   ├── test_kalman_filter.py      # Unit tests — Kalman Filter & Noise Model
+│   ├── test_mujoco_sim.py         # Unit tests — MuJoCo physics & tracking
+│   ├── test_obstacle_avoidance.py # Unit tests — LiDAR & Reactive Avoidance
+│   ├── test_pybullet_sim.py       # Unit tests — PyBullet Aviary simulation
+│   └── test_sitl_bridge.py        # Unit tests — SITLBridge
+│
+├── run_mujoco_simulation.py       # ⭐ MuJoCo 3D City Sim (LiDAR + KF + Avoidance)
+├── run_pybullet_simulation.py     # ⭐ PyBullet City Sim (LiDAR + KF + Avoidance)
+├── run_gazebo_simulation.py       # Gazebo simulation runner (WSL2 bridge)
+├── run_gazebo_bridge.py           # WebSocket telemetry bridge server
+├── gazebo_visualizer.html         # Real-time 3D web telemetry dashboard
+├── set_target.py                  # CLI target setter utility
+├── track_error.py                 # Pure Python 50 Hz trajectory error tracker
+├── launch_gazebo_wsl.py           # Launches Gazebo inside WSL2
+├── run_gazebo.sh                  # Bash launcher (inside WSL Ubuntu)
+│
+├── START_MUJOCO_SIM.bat           # 1-click MuJoCo 3D City simulator launcher
+├── START_PYBULLET_SIM.bat         # 1-click PyBullet 3D City simulator launcher
+├── START_GAZEBO_GUI.bat           # 1-click Gazebo simulator launcher
+├── launch_web_visualizer.bat      # 1-click web visualizer launcher
+│
+├── GAZEBO_INSTALLATION_GUIDE.md   # Full Gazebo 11 + WSL2 setup guide
+└── Trajectory_tracking_control... # Reference research paper (PDF)
 ```
-
-Note: replace `<mujoco_model>.xml` and `<mujoco_runner>.py` with the actual file names used in the repository.
 
 ---
 
@@ -786,7 +795,85 @@ bridge.disconnect()
 
 ---
 
-## 15. Running Tests
+## 14. MuJoCo 3D Simulation, Sensor Noise & Kalman Filter
+
+In addition to Gazebo 11, the project includes a standalone **MuJoCo 3D Physics Simulation** ([`run_mujoco_simulation.py`](file:///d:/Drones/run_mujoco_simulation.py)) running at 500 Hz with native hardware OpenGL (WGL):
+
+- **Airport Flight Arena**: Helipad with markings, obstacle towers, slalom racing gates, daylight lighting, and dynamic mocap target beacon.
+- **Sensor Noise Model (`SensorNoiseModel`)**:
+  - Injects zero-mean Gaussian white noise into sensor readings:
+    - Position noise: $\sigma_{pos} = 0.05\text{ m}$ (GPS/Mocap variance)
+    - Velocity noise: $\sigma_{vel} = 0.08\text{ m/s}$ (Doppler/optical flow variance)
+    - Gyroscope rate noise: $\sigma_{\omega} = 0.02\text{ rad/s}$ (~$1.1^\circ/\text{s}$ IMU variance)
+- **Discrete-Time Kalman Filter (`KalmanFilter` / `QuadrotorStateEstimator`)**:
+  - 6-DOF double-integrator state vector $\mathbf{x} = [p_x, p_y, p_z, v_x, v_y, v_z]^T$.
+  - Continuous-to-discrete white noise acceleration process covariance $\mathbf{Q}(\Delta t)$.
+  - Joseph stabilized covariance update $\mathbf{P} = (\mathbf{I} - \mathbf{K}\mathbf{H})\mathbf{P}(\mathbf{I} - \mathbf{K}\mathbf{H})^T + \mathbf{K}\mathbf{R}\mathbf{K}^T$.
+  - 3D Angular Rate low-pass/Kalman damping filter (`AngularRateFilter`).
+  - Denoises the feedback before the Backstepping controller, cutting tracking jitter by $>50\%$.
+
+```powershell
+# Run with sensor noise & Kalman filter in 3D interactive viewer
+python run_mujoco_simulation.py
+
+# Compare performance without the filter (raw noisy state)
+python run_mujoco_simulation.py --no-filter
+
+# Run headless automated verification
+python run_mujoco_simulation.py --headless --duration 10.0
+```
+
+---
+
+## 15. gym-pybullet-drones 3D Simulation
+
+The project also provides complete support for **gym-pybullet-drones** ([`run_pybullet_simulation.py`](file:///d:/Drones/run_pybullet_simulation.py)), utilizing the official `CtrlAviary` environment and PyBullet physics engine:
+
+- **Physics Engine**: `gym_pybullet_drones.envs.CtrlAviary` at 250 Hz (`pyb_freq=250`, `ctrl_freq=250`).
+- **Motor Mixer (`ForceTorqueMixer`)**: Inverts the quadrotor force-torque allocation matrix to map continuous Lyapunov thrust $T$ and body torques $\boldsymbol{\tau}$ into individual motor RPMs:
+  $$\begin{bmatrix} T \\ \tau_x \\ \tau_y \\ \tau_z \end{bmatrix} = \begin{bmatrix} 1 & 1 & 1 & 1 \\ -d & -d & d & d \\ -d & d & d & -d \\ -c & c & -c & c \end{bmatrix} \begin{bmatrix} F_0 \\ F_1 \\ F_2 \\ F_3 \end{bmatrix}, \quad \text{RPM}_i = \sqrt{\frac{F_i}{k_f}}$$
+- **Integrated Kalman Filter & Noise**: Fuses [`SensorNoiseModel`](file:///d:/Drones/quadrotor_controller/kalman_filter.py#L11) with the discrete [`KalmanFilter`](file:///d:/Drones/quadrotor_controller/kalman_filter.py#L70) state estimator to denoise Crazyflie state observations before backstepping control.
+- **Flight Modes**: Full automated 3D trajectory tracking (Takeoff $\rightarrow$ Helical Spiral $\rightarrow$ Figure-8) and real-time custom waypoint redirection via `python set_target.py X Y Z`.
+
+```powershell
+# Run with PyBullet 3D interactive GUI (Noise + Kalman Filter enabled)
+python run_pybullet_simulation.py
+# Or 1-click launcher
+START_PYBULLET_SIM.bat
+
+# Compare with raw noisy feedback (no Kalman filter)
+python run_pybullet_simulation.py --no-filter
+
+# Run headless automated test
+python run_pybullet_simulation.py --headless --duration 5.0
+```
+
+---
+
+## 16. 3D Urban City Environment & Reactive LiDAR Obstacle Avoidance
+
+Both the **MuJoCo** and **gym-pybullet-drones** simulations include a realistic **Urban City World** equipped with real-time multi-beam LiDAR sensors and reactive path replanning:
+
+### 1. 3D Urban City Architecture
+- **Skyscrapers & High-Rises**: 14m Metropolitan Glass Tower with antenna beacon, 12m Financial Center with stepped setbacks, 10m Corporate Tech Complex, and 8.5m Residential Plaza Condominiums.
+- **Flight Corridor Obstacle Blocks**: Strategically placed building blocks (heights 1.8m to 3.2m) directly challenging urban flight corridors.
+- **Road Network & Helipad**: Dual 4-lane asphalt avenues with yellow/white dividing lines, sidewalk curbs, streetlamps, and central elevated helipad plaza.
+- **Urban Foliage**: Avenue trees with canopy foliage and roadside urban props.
+
+### 2. 10-Beam Omnidirectional LiDAR Sensing
+- **8 Horizontal 360° Raycast Beams**: Covering $0^\circ$ (Forward), $45^\circ$, $90^\circ$ (Left), $135^\circ$, $180^\circ$ (Rear), $225^\circ$, $270^\circ$ (Right), $315^\circ$ with up to 8.0m detection range.
+- **2 Vertical Clearance Beams**: Upward ceiling clearance ($+Z$) and downward ground proximity ($-Z$).
+- **Physics Hardware Emulation**: Implemented natively via `<rangefinder>` in MuJoCo (`d.sensordata`) and `p.rayTestBatch()` in PyBullet.
+
+### 3. Reactive Path Replanning & Detour Control
+- **Artificial Potential Field (APF)**: Computes a repulsive vector pushing radially outward from detected building blocks:
+  $$\vec{F}_{rep} = \sum_{i, d_i < d_{safe}} k_{rep} \left(\frac{d_{detect} - d_i}{d_{detect} - d_{safe}}\right)^{1.5} (-\hat{u}_i)$$
+- **Tangential Wall Circulation**: Adds an orthogonal circulation vector $\vec{F}_{circ} = \hat{z} \times \vec{F}_{rep}$ aligned with the mission goal. This guides the drone smoothly *around* building corners and canyon walls, preventing it from freezing or oscillating in local minima.
+- **Dynamic Waypoint / Velocity Blend**: Blends avoidance velocity with trajectory velocity $\vec{v}_{safe} = (1 - w)\vec{v}_{goal} + w\vec{v}_{avoid}$ to steer around the building and resume navigation once clear.
+
+---
+
+## 17. Running Tests
 
 ```powershell
 cd d:\Drones
@@ -798,27 +885,38 @@ python -m pytest tests/ -v
 | `test_normalize_quaternion` | Verifies $\|q\| = 1$ after normalization |
 | `test_decompose_attitude_recombines_to_original_quaternion` | Validates $q_{xy} \otimes q_z = q$ (Eq. 5, base paper) |
 | `test_controller_returns_positive_thrust_and_three_torques` | Output shape, type, and sign correctness |
+| `test_kalman_filter_dimensions_and_reset` | Validates KF matrix shapes ($\mathbf{F}, \mathbf{B}, \mathbf{Q}, \mathbf{P}$) and reset |
+| `test_kalman_filter_noise_suppression` | Confirms $>40\%$ RMSE noise reduction over raw sensor telemetry |
+| `test_sensor_noise_statistics` | Verifies Gaussian noise mean $\approx 0$ and variance $\approx \sigma^2$ |
+| `test_mujoco_with_noise_and_kalman_filter` | End-to-end MuJoCo physics stepping with noise + Kalman filter |
+| `test_pybullet_env_initialization` | Validates `gym-pybullet-drones` `CtrlAviary` environment loading |
+| `test_force_torque_mixer` | Verifies force-to-RPM mixing matrix inversion for hover thrust |
+| `test_pybullet_step_with_noise_and_kalman_filter` | End-to-end PyBullet stepping with backstepping control, noise & KF |
+| `test_lidar_scan_properties` | Validates 10-beam LiDAR reading distances and closest sector index |
+| `test_obstacle_avoider_clear_path` | Confirms nominal trajectory is unaltered when distance $> 2.2\text{m}$ |
+| `test_obstacle_avoider_head_on_repulsion_and_detour` | Verifies front obstacle triggers repulsive braking and lateral detour |
+| `test_obstacle_avoider_multidirectional_building_corner` | Verifies lateral steering away from buildings along side flanks |
 
 ---
 
-## 16. Key Observations
+## 18. Key Observations
 
 1. The quaternion decoupling $q = q_{xy} \otimes q_z$ allows translational and yaw dynamics to be controlled by two independent laws, each with its own Lyapunov stability proof.
 2. Computing the tilt error as $\hat{z}_{actual} \times \hat{z}_{desired}$ in $\mathbb{R}^3$ guarantees the shortest-angle rotation and avoids the unwinding phenomenon without any sign-flip logic on the quaternion.
 3. The helical trajectory period times ($T_{xy} = 6.25$ s, $T_z = 12.5$ s) are taken directly from the paper's experimental flight in Fig. 4 and reproduced exactly in the simulation.
 4. Scalar gains are used in place of the paper's matrix gains ($A_x = -I$, $A_v = -3I$, $A_t = -8I$, $A_r = -12I$). This is a standard simplification when hardware inertia parameters are not available.
 5. The 50 Hz control-loop rate matches the telemetry rate reported in the paper's experimental setup (Vicon data at 50 Hz to the quadrotor via radio link).
-6. The same controller and gains operate in both Gazebo and MuJoCo without structural changes, which indicates that the implementation is not tied to a specific simulator.
+6. The same controller and gains operate in both Gazebo, MuJoCo, and PyBullet without structural changes.
+7. State estimation via the discrete Kalman Filter successfully attenuates sensor noise, ensuring smooth Lyapunov backstepping torque commands without motor chatter.
 
 ---
 
-## 17. Limitations
+## 19. Limitations
 
 - Aerodynamic drag $f(v)$ is not modeled (set to zero in the simulation).
-- The inertia tensor $J$ and the gyroscopic coupling term $-J\omega \times \omega$ are not modeled in the controller.
+- The inertia tensor $J$ and the gyroscopic coupling term $-J\omega \times \omega$ are simplified with rate damping $k_{rate}$.
 - The dynamic thrust extension ($\ddot{T} = u_T$, Eq. 31 of the paper) is omitted. Thrust is computed algebraically.
 - The full 4-step backstepping cascade (position, velocity, thrust error, angular velocity error) is reduced to a 2-step proportional-derivative computation.
-- No real sensor noise or IMU model is included.
 
 ---
 
