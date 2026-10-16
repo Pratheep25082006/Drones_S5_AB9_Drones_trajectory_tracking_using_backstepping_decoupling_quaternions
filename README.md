@@ -30,9 +30,9 @@ Amrita Vishwa Vidyapeetham
 
 ## Abstract
 
-This project implements a real-time Backstepping Quaternion Trajectory Tracking Controller for a quadrotor helicopter. The controller is validated in two simulation environments: native Gazebo 11 running on WSL2 Ubuntu under Windows, and the MuJoCo physics engine. The control design follows the decoupled quaternion parametrization proposed by De Monte and Lohmann (2013), which splits the attitude quaternion into a tilt component $q_{xy}$ and a heading component $q_z$. This decomposition allows the translational and yaw dynamics to be controlled independently, yielding a cleaner and more analytically tractable backstepping procedure.
+This project implements a real-time Backstepping Quaternion Trajectory Tracking Controller for a quadrotor helicopter. The complete control law of the paper (four-step position backstepping with dynamic thrust extension and independent heading control) is implemented and validated under real rigid-body dynamics in MuJoCo (1.5 kg quadrotor) and gym-pybullet-drones/PyBullet (27 g Crazyflie), with Gazebo 11 (WSL2) as a 3D viewer, a web telemetry dashboard and an ArduPilot/MAVLink bridge. The control design follows the decoupled quaternion parametrization proposed by De Monte and Lohmann (2013), which splits the attitude quaternion into a tilt component $q_{xy}$ and a heading component $q_z$. This decomposition allows the translational and yaw dynamics to be controlled independently, yielding a cleaner and more analytically tractable backstepping procedure.
 
-The system executes autonomous 3D flight trajectories, namely a Helical Spiral and a 3D Figure-8 Loop, while streaming live 6-DOF telemetry at 50 Hz to a WebSocket-based browser visualizer. An optional ArduPilot SITL/MAVLink bridge (`SITLBridge`) is included for hardware-in-the-loop extension.
+The system reproduces the paper's switched set-point (Fig. 3) and vertical-helix (Fig. 4) experiments with sub-centimetre accuracy, flies a figure-8 mission, adds Gaussian sensor noise with a Kalman filter state estimator and LiDAR-based obstacle avoidance in a city environment, and streams live 6-DOF telemetry to a WebSocket browser dashboard. An optional ArduPilot SITL/MAVLink bridge (`SITLBridge`) is included for hardware-in-the-loop extension.
 
 ---
 
@@ -74,7 +74,7 @@ P. De Monte and B. Lohmann (2013). "Trajectory Tracking Control for a Quadrotor 
 
 ### Relation to the Present Project
 
-The present project implements the quaternion decomposition and backstepping control law from the paper in Python, and validates it in Gazebo 11 and MuJoCo 3D simulations. The helix trajectory period times (6.25 s and 12.5 s) are taken directly from the paper's Fig. 4 experiment. Gains are re-tuned as scalar values for the simulation context.
+The present project implements the complete method of the paper in Python (`quadrotor_controller/paper_controller.py`): the quaternion decomposition, heading kinematics (eq. 24), dynamic thrust extension (eq. 31), input transformation (eq. 29), four-step position backstepping (eqs. 32-46) and heading backstepping (eqs. 47-54), with the paper's gains. The Fig. 3 and Fig. 4 experiments are reproduced (`track_error.py`). The earlier simplified two-step law is kept in `controller.py` as a baseline for comparison.
 
 ---
 
@@ -160,794 +160,383 @@ The controller selects $T$ (direction and magnitude) so that gravity is compensa
 
 ---
 
-### 4.4 Backstepping Position Control
-
-Backstepping proceeds as a chain of objectives: position is regulated first, then velocity, then thrust, with each step building on the previous one.
-
-Step 1: position error.
-
-$$
-z_x = x - x_T
-$$
-
-Here $z_x$ is the deviation of the vehicle from the reference position.
-
-$$
-V_x = \frac{1}{2} z_x^\top z_x
-$$
-
-Here $V_x$ is a Lyapunov function, an energy-like measure that the controller drives to zero. When $V_x = 0$, the vehicle is exactly at the reference position.
-
-$$
-v_d = \dot{x}_T + A_x z_x \qquad (A_x < 0)
-$$
-
-Here $v_d$ is the desired velocity. It consists of the feedforward trajectory velocity $\dot{x}_T$ and a correction term $A_x z_x$ that drives the vehicle toward the reference.
-
-Step 2: velocity error.
-
-$$
-z_v = v - v_d
-$$
-
-Here $z_v$ is the difference between the current velocity and the desired velocity.
-
-$$
-\ddot{x}_{des} = \ddot{x}_T + k_{pos} (x_T - x) + k_{vel} (\dot{x}_T - v)
-$$
-
-This expression gives the desired acceleration, composed of three terms:
-
-- $\ddot{x}_T$: trajectory acceleration (feedforward).
-- $k_{pos}(x_T - x)$: position correction.
-- $k_{vel}(\dot{x}_T - v)$: velocity correction.
-
-$$
-\vec{T} = m g \hat{e}_3 + m \ddot{x}_{des}
-$$
-
-This is the required thrust vector. The term $m g \hat{e}_3$ cancels gravity, and $m \ddot{x}_{des}$ produces the desired motion. The direction of $\vec{T}$ determines the required tilt, and its magnitude determines the collective thrust.
-
-Horizontal acceleration limit:
-
-$$
-a_{xy} \leftarrow \frac{a_{xy}}{\|a_{xy}\|}\cdot\min\left(\|a_{xy}\|, 5.0\right) \text{ m/s}^2
-$$
-
-If the computed horizontal acceleration exceeds 5 m/s², it is scaled down to 5 m/s² while preserving its direction. This prevents excessive tilt.
-
-Thrust saturation:
-
-$$
-T = \max\left(0, \min\left(2.5 \cdot m g, \|\vec{T}\|\right)\right)
-$$
-
-Thrust is limited between zero and 2.5 times the hover thrust (approximately 36.8 N), which models realistic motor limits.
-
 ---
 
-### 4.5 Tilt Attitude Error
+### 4.4 Backstepping Position Control (paper Sec. III-A, eqs. 25-46)
+
+The translational model is $\dot{x} = v$, $\dot{v} = f(v) + g + \tfrac{1}{m}T$ (eq. 26), and the thrust vector changes through the tilt rates and the thrust rate (eq. 27):
 
 $$
-\hat{z}_{actual} = R(q) \hat{e}_3
+\dot{T} = M(q_{xy})\,D(T)\,R(q_z)\begin{bmatrix}\omega_{xy}\\ \dot{T}\end{bmatrix}
 $$
 
-Here $\hat{z}_{actual}$ is the current direction of the thrust axis in the world frame, obtained by rotating the body-frame vertical axis with the current quaternion.
+The angular velocity $\omega_z$ does not appear, so position and heading are decoupled. The thrust magnitude is extended by two integrators, $\ddot{T} = u_T$ (eq. 31), which gives a smooth thrust. The input transformation $\tau = -J\omega\times\omega + J\tilde{\tau}$ (eq. 29) gives direct access to $\dot{\omega} = \tilde{\tau}$.
+
+Backstepping is done in four steps, each adding an error and a Lyapunov term:
+
+| Step | Error | Virtual control | Lyapunov function |
+|---|---|---|---|
+| 1 Position | $z_x = x - x_T$ | $v_d = \dot{x}_T + A_x z_x$ (33) | $V_x = \tfrac12 z_x^\top z_x$ |
+| 2 Velocity | $z_v = v - v_d$ | $T_d = m(-f - g + \dot{v}_d - z_x + A_v z_v)$ (37) | $V_v = V_x + \tfrac12 z_v^\top z_v$ |
+| 3 Thrust vector | $z_t = T - T_d$ | $[\omega_{xyd};\ \dot{T}_d] = R^\top D^{-1} M^\top(\dot{T}_d + A_t z_t - \tfrac1m z_v)$ (41) | $V_t = V_v + \tfrac12 z_t^\top z_t$ |
+| 4 Rates | $z_r = [\omega_{xy}-\omega_{xyd};\ \dot{T}-\dot{T}_d]$ | $[\tilde{\tau}_{xy};\ u_T] = [\dot{\omega}_{xyd};\ \ddot{T}_d] + A_r z_r - R^\top D M^\top z_t$ (45) | $V_\omega = V_t + \tfrac12 z_r^\top z_r$ |
+
+With $A_x, A_v, A_t, A_r < 0$ the closed loop satisfies
 
 $$
-\hat{z}_{desired} = \frac{\vec{T}}{\|\vec{T}\|}
+\dot{V}_\omega = z_x^\top A_x z_x + z_v^\top A_v z_v + z_t^\top A_t z_t + z_r^\top A_r z_r \le 0 \qquad (46)
 $$
 
-Here $\hat{z}_{desired}$ is the required thrust direction, obtained by normalizing the thrust vector.
+so all errors converge to zero. The controller needs $x_T$ and its derivatives up to the 4th order ($x_T \in C^4$). Every derivative of a virtual control ($\dot{T}_d$, $\ddot{T}_d$, $\dot{\omega}_{xyd}$) is computed analytically from the model.
+
+Implementation notes (`quadrotor_controller/paper_controller.py`):
+- ENU world frame / FLU body frame (thrust along $+z_B$, $g = (0,0,-9.81)$). The paper uses NED with thrust along $-z_B$; the equations are the same after this sign change.
+- The product $M(q_{xy})D(T)R(q_z)$ is evaluated in its equivalent vector form $\dot{T} = R(q)\,[T\omega_y,\,-T\omega_x,\,\dot{T}]^\top$.
+- $z_t$ is normalised by the mass ($z_t = (T-T_d)/m$). For $m = 1$ kg this is exactly the paper's law; for other masses it is the same design with a Lyapunov weight $1/m^2$, which lets the same gains work for the 1.5 kg model and the 27 g Crazyflie.
+- Drag: $f(v) = -c\,v$ (parameter `drag`, default 0 like the paper's experiments). With drag in the plant, the compensation reduces the helix error from 12.5 cm to 0.3 cm (unit test `test_drag_compensation_term_f_v`).
+
+### 4.5 Heading Control (paper Sec. III-B, eqs. 47-54)
+
+The heading is taken from the heading quaternion, $\varphi = 2\arcsin(q_z)$, and its kinematics follow from the decomposition:
 
 $$
-\tau_{rp} = k_{tilt} \cdot \left(\hat{z}_{actual} \times \hat{z}_{desired}\right) - k_{rate} \cdot \omega_{rp}
+\dot{\varphi} = \omega_z - l(q_{xy})^\top R_s(q_z)\,\omega_{xy} \qquad (24)
 $$
 
-This computes the roll and pitch torque commands.
-
-- $\hat{z}_{actual} \times \hat{z}_{desired}$: the cross product has a magnitude proportional to the angle between the two directions and points along the rotation axis that aligns them. This selects the shortest rotation path automatically.
-- $k_{tilt}$ times the cross product: proportional correction.
-- $-k_{rate} \omega_{rp}$: damping term that limits overshoot.
-
----
-
-### 4.6 Independent Yaw Control
+(verified numerically in the tests). With $z_\varphi = \mathrm{mod}(\varphi - \varphi_T + \pi, 2\pi) - \pi$:
 
 $$
-\psi_{error} = \mathrm{wrap}\left(\psi_{ref} - \psi_{actual}\right)
+\omega_{zd} = \dot{\varphi}_T + a_\varphi z_\varphi + l^\top R_s\,\omega_{xy} \quad (48), \qquad
+\tilde{\tau}_z = \dot{\omega}_{zd} + a_{\omega z} z_{\omega z} - z_\varphi \quad (52)
 $$
 
-Here $\psi_{error}$ is the heading error. The wrap function constrains the error to $(-180^\circ, +180^\circ]$ so that the vehicle always turns the short way.
+which gives $\dot{z}_\varphi = a_\varphi z_\varphi + z_{\omega z}$ and $\dot{z}_{\omega z} = a_{\omega z} z_{\omega z} - z_\varphi$ (53-54), i.e. asymptotic stability that does not depend on the position control.
 
-$$
-\tau_{yaw} = k_{yaw} \cdot \psi_{error} - k_{rate} \cdot \omega_z
-$$
+### 4.6 Reference Trajectories (C⁴ references)
 
-This is the yaw torque command, consisting of a proportional term on the heading error and a damping term on the yaw rate. Because of the $q_{xy}/q_z$ split, this torque is computed independently of the position control, so changing the heading does not interfere with flight to the target position.
+All references carry position, velocity, acceleration, jerk and snap, plus heading, heading rate and heading acceleration (`quadrotor_controller/trajectory.py`).
 
-Closed-loop heading stability:
+- **Paper helix (Fig. 4):** $x_T = \sin(\omega_{xy}t)$, $y_T = -2\cos(\omega_{xy}t)$, $z_T = 1 + 0.5\sin(\omega_z t)$, $\varphi_T = \sin(\omega_z t)$ with $\omega_{xy} = 2\pi/6.25$ and $\omega_z = 2\pi/12.5$. The amplitudes are read off Fig. 4: y lags x by a quarter period, the height is 0.5–1.5 m and the heading is ±1 rad.
+- **Figure-8 (project extension):** $x_T = 2\sin(\omega t)$, $y_T = \sin(2\omega t)$, $z_T = 1.2 + 0.3\cos(\omega t)$, $\omega = 2\pi/12$.
+- **Mission:** takeoff → hover → transfer → helix (4 periods) → transfer → figure-8 (2 periods) → back to hover, repeating. Each manoeuvre starts and ends at rest. The time warp $\tau(t)$ uses a degree-9 smoothstep speed ramp, with derivatives from Faà di Bruno's formula, so the reference stays $C^4$ at every joint and never exceeds the speed of the individual trajectories (2.0 m/s).
+- **Set points (`set_target.py X Y Z [heading]`):** a 5th-order critically damped reference model $X_T/X_C = 1/(\tau s+1)^5$ per axis gives $x_T \in C^4$; for heading a 3rd-order model gives $\varphi_T \in C^2$. This is the "reference model" of the paper's Fig. 3 experiment. The time constant grows with the step size so the peak reference speed stays below the limit.
 
-$$
-\dot{z}_\psi = a_\psi \cdot z_\psi + z_{\omega_z}
-$$
+### 4.7 Sensor Noise and Kalman Filter
 
-$$
-\dot{z}_{\omega_z} = a_{\omega_z} \cdot z_{\omega_z} - z_\psi
-$$
+- `SensorNoiseModel`: Gaussian noise on position ($\sigma = 5$ cm), velocity (8 cm/s) and gyro (0.02 rad/s).
+- `KalmanFilter`: 6-state model $[p, v]$ with $F$, $B$, $Q$, $R$, $P$ and the Joseph-form update. The prediction uses the known model acceleration $u = g + R(q)e_3 T/m + f(v)$ from the controller (`model_acceleration`), so the filter does not lag during manoeuvres.
+- `AngularRateFilter`: first-order filter on the gyro rates ($\alpha = 0.2$ at 500 Hz).
+- Result: position error drops from 8.7 cm (raw) to about 0.5 cm (estimate), and the torque command chatter drops about 80× (see Section 5).
 
-These equations describe the evolution of the heading error $z_\psi$ and the yaw-rate error $z_{\omega_z}$. Since $a_\psi < 0$ and $a_{\omega_z} < 0$, both errors decay to zero, which establishes asymptotic stability of the yaw controller.
+### 4.8 Global path planner (project extension)
 
----
+The LiDAR only sees a few metres, so set-point flights are planned first on the city map (`path_planner.GridPlanner`, `world_map.WorldMap`), the same in every simulator:
 
-### 4.7 Full Control Command
+1. If the straight line is free (keeping the clearance), the drone flies straight.
+2. If the target is inside a building or obstacle, it is moved to the nearest free point that can be reached.
+3. Otherwise the drone climbs or descends vertically to a cruise height (the higher of start and goal). A* finds a route around the blocks at that height, and the route is shortened to the fewest straight legs.
+4. If there is no route at that height, the drone flies over the top of the blocking buildings.
 
-At every 20 ms step the controller outputs:
+The corners of the route are then rounded into one smooth curve, as large as the obstacles allow (`planner.corner_radius`). The first and last bends can start right at the take-off point or the goal, so the drone climbs and turns at the same time instead of flying "straight up, then across". The carrot follows the densely sampled curve, and the reactive LiDAR avoidance stays active. Settings are in `config.yaml` → `planner`. Gazebo has no collision engine for the flight core, so its LiDAR is a ray cast on the same city map.
 
-```
-thrust, (tau_roll, tau_pitch, tau_yaw) = controller.compute_command(state, reference, dt=0.02)
-```
+### 4.9 LiDAR Obstacle Avoidance (project extension)
 
-Fifty times per second the controller reads the current state (position, velocity, orientation, angular rates) and the reference trajectory, evaluates the equations above, and outputs:
+10 beams: 8 horizontal (45° apart, in the heading frame) plus up and down. In MuJoCo they use `mj_ray`, ignoring the target marker; in PyBullet they use `rayTestBatch`. `ReactiveObstacleAvoider` combines a repulsive potential field with a tangential "wall-following" circulation, and adds two refinements:
+- `ignore_behind`: only obstacles in the direction of travel are considered.
+- Side memory (hysteresis): once the drone has chosen to pass an obstacle on one side it keeps that side, which removes the local minimum in front of symmetric obstacles.
 
-- `thrust`: collective thrust in Newtons.
-- `tau_roll`, `tau_pitch`, `tau_yaw`: roll, pitch, and yaw torque commands.
-
----
-
-### 4.8 Trajectory Generation
-
-Helical Spiral (period times from the paper: $T_{xy} = 6.25$ s horizontal, $T_z = 12.5$ s vertical):
-
-$$
-\omega_{xy} = \frac{2\pi}{6.25}
-$$
-
-$$
-\omega_z = \frac{2\pi}{12.5}
-$$
-
-$$
-x_T = 2\sin(\omega_{xy} t)
-$$
-
-$$
-y_T = 2\cos(\omega_{xy} t)
-$$
-
-$$
-z_T = 1.5 + \sin(\omega_z t)
-$$
-
-The vehicle follows a corkscrew path: a circle of radius 2 m in the horizontal plane completed every 6.25 s, with altitude oscillating on a 12.5 s period. The 90 degree phase shift between $x_T$ and $y_T$ produces the circular motion, and the sinusoidal $z_T$ produces smooth altitude variation.
-
-3D Figure-8 (Lemniscate):
-
-$$
-\omega = \frac{2\pi}{9}
-$$
-
-$$
-x_T = 2.5\sin(\omega t)
-$$
-
-$$
-y_T = 2.5\sin(2\omega t)
-$$
-
-$$
-z_T = 2.2 + 0.6\cos(\omega t)
-$$
-
-The $x$ coordinate uses frequency $\omega$ and the $y$ coordinate uses $2\omega$, producing a Lissajous figure-8 pattern. The altitude oscillates with amplitude 0.6 m. The full path repeats every 9 s.
-
----
-
-### 4.9 Second-Order Reference Filter (Bridge Mode)
-
-Purpose: the backstepping controller in Section 4.4 needs a reference that is smooth, meaning it must supply the target position $x_T$, velocity $\dot{x}_T$, and acceleration $\ddot{x}_T$ at every instant. A trajectory such as the helix provides these analytically. A target typed by the user, for example `set_target.py 5 5 10`, does not: it is a single point that changes instantaneously, which is a step input. Feeding a step directly into the controller would produce a very large position error, saturated acceleration and thrust commands, aggressive tilting, and no usable velocity or acceleration reference. The second-order reference filter converts the step into a smooth, physically reasonable path toward the new target.
-
-Filter equations:
-
-$$
-\ddot{x}_{ref} = \frac{x_{target} - x_{ref} - 2 \tau \cdot \dot{x}_{ref}}{\tau^2}
-$$
-
-$$
-\dot{x}_{ref} \leftarrow \dot{x}_{ref} + \ddot{x}_{ref} \cdot \Delta t
-$$
-
-$$
-x_{ref} \leftarrow x_{ref} + \dot{x}_{ref} \cdot \Delta t
-$$
-
-Symbol definitions:
-
-- $x_{target}$: the commanded final position (the step input from the user).
-- $x_{ref}$, $\dot{x}_{ref}$, $\ddot{x}_{ref}$: the filtered reference position, velocity, and acceleration. These are the filter states and outputs.
-- $\tau$: the filter time constant, set to 0.8 s.
-- $\Delta t$: the control period, 0.02 s at 50 Hz.
-
-How the equations work:
-
-1. The first equation computes the reference acceleration. It acts like a spring and a damper attached to the target. The term $x_{target} - x_{ref}$ is the spring: it pulls the reference toward the target, and the pull is stronger when the reference is farther away. The term $-2\tau \dot{x}_{ref}$ is the damper: it opposes the reference velocity so the reference does not overshoot. The division by $\tau^2$ sets how stiff the response is.
-2. The second equation integrates the acceleration over one timestep to update the reference velocity.
-3. The third equation integrates the velocity over one timestep to update the reference position.
-
-These three steps run every control cycle, so the reference moves along a smooth curve instead of jumping.
-
-Why this form: rearranging the first equation gives $\tau^2 \ddot{x}_{ref} + 2\tau \dot{x}_{ref} + x_{ref} = x_{target}$. In the Laplace domain this is the transfer function
-
-$$
-\frac{X_{ref}(s)}{X_{target}(s)} = \frac{1}{(\tau s + 1)^2}
-$$
-
-which has a double pole at $s = -1/\tau$. This is a critically damped second-order system, so the reference reaches the target as fast as possible without overshoot and without oscillation.
-
-Behavior for a step change of size $D$ (per axis):
-
-- The reference position rises smoothly along an S-shaped curve and settles at the target.
-- The reference velocity starts at zero, rises to a single peak, and returns to zero. The peak occurs at $t = \tau$ and has magnitude $D/(e \tau) \approx 0.37 D/\tau$.
-- The reference acceleration is largest at the start, with magnitude $D/\tau^2$, then reverses sign to decelerate the reference and decays to zero.
-- Settling to within about 2 percent of the target takes roughly $5.8 \tau$, which is about 4.7 s for $\tau = 0.8$ s.
-
-Example: for a step of $D = 5$ m on one axis with $\tau = 0.8$ s, the peak reference velocity is about 2.3 m/s, reached at 0.8 s after the command, and the reference is within 2 percent of the target after about 4.7 s. The initial reference acceleration of about 7.8 m/s² is limited by the horizontal acceleration cap of 5.0 m/s² in the controller (Section 4.4).
-
-Tuning of $\tau$:
-
-- Smaller $\tau$ gives a faster response with higher peak velocity and acceleration, and therefore more aggressive tilting.
-- Larger $\tau$ gives a slower and gentler response with lower peak velocity and acceleration.
-- $\tau$ should stay much larger than $\Delta t$. With $\tau = 0.8$ s and $\Delta t = 0.02$ s the simple Euler integration used above is accurate and stable.
-
-Implementation notes:
-
-- The filter is applied independently to each of the three axes (X, Y, Z), so $x_{ref}$, $\dot{x}_{ref}$, and $\ddot{x}_{ref}$ are 3-vectors.
-- The outputs are passed to the controller as the reference: $x_{ref}$ becomes $x_T$, $\dot{x}_{ref}$ becomes $\dot{x}_T$, and $\ddot{x}_{ref}$ becomes $\ddot{x}_T$ in the backstepping law of Section 4.4. In the API this corresponds to the `position`, `velocity`, and `acceleration` fields of `ControllerReference`.
-- Because the reference acceleration is passed as feedforward, the controller anticipates the motion instead of only reacting to the position error, which improves tracking.
-- The filter states are initialized at the current vehicle position with zero velocity and acceleration. A new target only changes $x_{target}$, so the reference continues smoothly even if a new target is issued while the vehicle is still moving.
-- The filter is used in target setpoint mode (Section 12). In automatic trajectory mode, the analytic helix and figure-8 references are used directly.
+For set-point flights a lead point (carrot) moves toward the goal, is steered by the avoider and is kept within 0.8 m of the reference. The 5th-order reference model follows the carrot, so the reference stays smooth. With targets placed behind buildings this gave zero collisions in MuJoCo and PyBullet.
 
 ---
 
 ## 5. Simulation Results
 
-### 5.1 Gazebo 11: 3D Physics Simulation
+### 5.1 Paper experiments reproduced (`track_error.py`)
 
-The quadrotor is spawned inside a native Gazebo 11 world (`models/quadrotor.world`) running inside WSL2 Ubuntu. The backstepping controller streams pose commands over UDP at 50 Hz to move the model in real time.
+Rigid-body model (m = 1.5 kg, J = diag(0.03, 0.03, 0.05) kg m²), RK4 at 500 Hz, paper gains.
+
+| Experiment | Controller | Sensors | RMSE (cm) | Max error (cm) | Heading RMSE (deg) | Max speed (m/s) | Max tilt (deg) | Torque chatter |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| Fig. 3 switched set points | Full 4-step paper law | ideal | 0.01 | 0.04 | 0.00 | 1.46 | 12.8 | 0.32 |
+| Fig. 3 switched set points | Full 4-step paper law | noise + KF | 0.61 | 1.36 | 0.13 | 1.47 | 13.0 | 3.02 |
+| Fig. 3 switched set points | Simplified 2-step (old) | ideal | 13.60 | 36.61 | 8.12 | 1.86 | 16.5 | 0.18 |
+| Fig. 4 vertical helix | Full 4-step paper law | ideal | 0.00 | 0.01 | 0.00 | 2.02 | 11.8 | 0.01 |
+| Fig. 4 vertical helix | Full 4-step paper law | noise + KF | 0.65 | 1.29 | 0.05 | 2.02 | 12.0 | 3.01 |
+| Fig. 4 vertical helix | Full 4-step paper law | noise, no filter | 0.59 | 1.18 | 0.03 | - | - | 249.29 |
+| Fig. 4 vertical helix | Simplified 2-step (old) | ideal | 20.62 | 27.41 | 6.60 | 2.33 | 13.7 | 0.02 |
+| Mission (takeoff-helix-fig8) | Full 4-step paper law | noise + KF | 0.64 | 1.34 | 0.04 | 2.03 | 12.4 | 3.00 |
+| Mission (takeoff-helix-fig8) | Simplified 2-step (old) | noise + KF | 17.01 | 33.73 | 3.99 | 2.34 | 17.5 | 2.98 |
+
+The full table is in [`results_table.md`](results_table.md). Plots and data are in `results/`:
+
+- `helix_fig4.png`: x, y, z and heading versus the reference, in the same layout as the paper's Fig. 4.
+- `setpoints_fig3.png`: switched set points, as in Fig. 3.
+- `noise_kalman_error.png`: tracking error and torque commands with and without the filter.
+
+Observations:
+- With the full 4-step law the error is about 20–40× smaller than with the earlier simplified 2-step PD law, and the heading error is practically zero (decoupling).
+- With noise the tracking error stays below 1.5 cm. The Kalman filter's main contribution is the actuator side: the torque-rate RMS drops from 249 to 3 N m/s.
+- The paper reports (real Hummingbird) a 1.4 m/s maximum speed and 18° tilt for the helix, and 2.2 m/s and 22° for set-point switching. In simulation the commanded helix reaches 2.0 m/s and 12° tilt; the paper notes its real vehicle reached a smaller amplitude than commanded.
+
+### 5.2 3D simulators: full mission with noise and Kalman filter (75 s, seed 3)
+
+| Phase | MuJoCo (1.5 kg) RMSE / max | PyBullet CF2X (27 g) RMSE / max |
+|---|---|---|
+| Takeoff | 0.52 / 0.92 cm | 2.16 / 7.00 cm (starts 7 cm below the first reference) |
+| Hover | 0.53 / 0.80 cm | 0.53 / 0.80 cm |
+| Transfer | 0.65 / 1.21 cm | 0.64 / 1.07 cm |
+| Helix (Fig. 4) | 0.58 / 1.23 cm | 0.58 / 1.23 cm |
+| Figure-8 | 0.70 / 1.34 cm | 0.70 / 1.33 cm |
+
+In both simulators the drone is moved only by the controller's thrust and torques: MuJoCo actuators, and PyBullet motor RPMs through the CF2X mixer. PyBullet's default numerical velocity damping is switched off for the drone (it slowed a gliding drone from 2.0 to 1.78 m/s in 1 s and caused about 8 cm of helix error).
+
+### 5.3 Gazebo 11 and web dashboard
+
+Gazebo's quadrotor model is kinematic (a 3D viewer). The flight is computed by `PythonFlightSim`: the rigid body at 500 Hz with the same controller, noise, Kalman filter and guidance. Its pose (and the target marker's) reaches Gazebo through a small model plugin, `gazebo_plugin/udp_pose_plugin.cc`, which reads UDP packets every physics step and sets the model pose, so the drone moves smoothly at the controller rate. Build it once in WSL with `bash build_gazebo_plugin.sh` (`run_gazebo.sh` does this automatically). If the plugin is not built, the runners fall back to `gz model` (`gazebo.pose_transport`). Gazebo loads the same generated city as MuJoCo and PyBullet (`models/quadrotor.world`). The web bridge (`run_gazebo_bridge.py`) uses the same core. Tested headless: a dashboard command flew to (2, 2, 3) m with 2 mm error, and helix mode tracked as expected.
 
 ![Gazebo 3D Drone Simulator and Web Telemetry Dashboard](assets/web_visualizer.jpg)
 
-Fig. 1. Live web telemetry dashboard showing the vehicle at position (0.99, 0.99, 1.98) m with a tracking error of 0.001 m and a total thrust of 14.68 N during the hover phase.
+### 5.4 3D web dashboard (Gazebo backend)
 
-Dashboard summary:
+`START_WEB_DASHBOARD.bat` starts Gazebo 11 in WSL together with the backend, `run_web_dashboard.py`. The backend contains the flight core: the paper controller, sensor noise, Kalman filter, LiDAR on the city map, avoidance and the path planner. It sends every pose to Gazebo and serves the front end `drone_dashboard.html` in the Windows browser at http://localhost:8090.
 
-- Actual and target position are both (0.99, 0.99, 1.98) m, indicating convergence.
-- Tracking error is 0.001 m, i.e. below 1 mm steady-state hover error.
-- Total thrust is 14.68 N, approximately 1.5 kg x 9.81 m/s², which corresponds to gravity compensation.
-- WebSocket status is CONNECTED, with the 50 Hz telemetry stream active.
+The front end shows:
 
----
+- **3D city:** the same generated world as MuJoCo, PyBullet and Gazebo. It has orbit, follow and top cameras, and buildings can be solid, see-through or hidden.
+- **On the city:** the flown path, the reference, the planned route curve and the target.
+- **Live trajectory values:** time, mode, position, reference, error, velocity, speed, roll/pitch/yaw, body rates, thrust, torques, Kalman-filter error, sensor noise, Lyapunov value, LiDAR status, goal and route.
+- **Charts** of x, y, z (actual vs reference), error, speed and thrust over the last 60 s, with hover values.
 
-### 5.2 MuJoCo: Rigid-Body Dynamics Simulation
+**Targets:** type X Y Z (and a heading), or click the ground or a roof. Hovering over the city shows building heights and footprints. **Check route** answers the question "can the drone fly between the buildings?" before it flies. It reports a straight path, a path between buildings with the narrowest gap width, a route around the obstacles, or a route over the top. It also says when a target inside a building has been moved, and it gives the route length, the minimum clearance and an estimated flight time. The route is drawn as a dashed preview.
 
-In addition to Gazebo, the controller was implemented and validated in the MuJoCo physics engine. MuJoCo integrates the full rigid-body dynamics of the vehicle, so the controller outputs (collective thrust and body torques) act on a dynamic model instead of a kinematic pose update. This provides a more demanding test of the backstepping law.
+**Export:** all trajectory values, one row per simulated second (32 columns), as CSV or JSON. Each export is also saved in `results/`.
 
-Implementation points:
+The backend uses only the Python standard library and numpy, and three.js is bundled in `web_vendor/`, so the dashboard runs without internet. API: `GET /api/telemetry`, `/api/world`, `/api/route`, `/api/export.csv` and `/api/export.json`; `POST /api/command`, `/api/check_route` and `/api/clear_log`.
 
-- The quadrotor is described in a MuJoCo MJCF model (XML) with a free-joint base body, mass and inertia properties, and four rotor sites.
-- The controller outputs collective thrust and roll, pitch, and yaw torques at 50 Hz. These are applied to the body through MuJoCo's actuator or applied-force interface at every control step.
-- The physics timestep is set smaller than the control period, so several physics steps are integrated between consecutive control updates.
-- The full state (position, velocity, unit quaternion, angular rate) is read from the simulator each cycle and passed to `BacksteppingController` as `ControllerState`.
-- The same trajectory generators (hover, helical spiral, figure-8) and the same reference filter are reused without modification, so results are directly comparable with the Gazebo runs.
-- Telemetry from the MuJoCo run is published through the same WebSocket bridge, so the browser dashboard works with either simulator.
-- Controller gains and safety limits (Section 6) are identical in both environments.
+### 5.5 ArduPilot / MAVLink
 
-![MuJoCo Quadrotor Simulation](ADD_MUJOCO_SIMULATION_IMAGE_URL_HERE)
+`SITLBridge` converts ArduPilot's NED/FRD state to ENU/FLU and sends the paper controller's body-rate reference $(\omega_{xd}, \omega_{yd}, \omega_{zd})$ and thrust with `SET_ATTITUDE_TARGET`; ArduPilot's rate loop tracks them. `run_ardupilot_sitl.py` runs the full ground-station sequence:
 
-Fig. 2. MuJoCo simulation of the quadrotor during trajectory tracking.
+1. Start SITL or connect to it (`mavlink.launch`: `none` / `dronekit` / `command`).
+2. Request `ATTITUDE` and `LOCAL_POSITION_NED` at 50 Hz (`SET_MESSAGE_INTERVAL`).
+3. Read `MOT_THST_HOVER` (`hover_throttle: auto`) and set `GUID_OPTIONS = 8` (thrust field is thrust), checking each `PARAM_VALUE`.
+4. Wait for the EKF position, switch to GUIDED and arm, each confirmed by the heartbeat. Autopilot `STATUSTEXT` messages (pre-arm failures) are printed.
+5. Fly with the paper controller and send a 1 Hz GCS heartbeat. Control is released if the pilot or a failsafe changes the mode.
+6. LAND and wait for the autopilot to disarm.
 
-![MuJoCo Trajectory Tracking Plot](ADD_MUJOCO_TRAJECTORY_PLOT_URL_HERE)
-
-Fig. 3. Reference trajectory versus actual trajectory in MuJoCo.
-
-![MuJoCo Tracking Error Plot](ADD_MUJOCO_ERROR_PLOT_URL_HERE)
-
-Fig. 4. Position tracking error over time in MuJoCo.
-
-Demonstration video: [ADD_MUJOCO_VIDEO_URL_HERE](ADD_MUJOCO_VIDEO_URL_HERE)
-
----
-
-### 5.3 Performance Table: Position Tracking Error
-
-The following results were generated by running [`track_error.py`](track_error.py), which executes the full backstepping controller at 50 Hz in a pure Python simulation and records the Euclidean position tracking error $\|x - x_T\|$ at every timestep.
-
-| Phase | Duration | Mean Error | Max Error | Final Error | RMSE | Avg Thrust |
-|---|---|---|---|---|---|---|
-| Hover | 4 s | 0.5673 m | 2.0000 m | 0.0514 m | 0.8384 m | 14.66 N |
-| Helical Spiral | 18 s | 0.3950 m | 2.0738 m | 0.2975 m | 0.5320 m | 15.11 N |
-| 3D Figure-8 | 18 s | 1.4289 m | 3.2621 m | 2.2563 m | 1.6728 m | 16.05 N |
-| Overall Average | 40 s | 0.7971 m | 3.2621 m | N/A | 1.0144 m | 15.27 N |
-
-Interpretation:
-
-- Hover final error is 0.0514 m. The controller converges to within 5 cm of the hover target after the initial transient from rest (start at z = 0, target z = 2 m).
-- The large initial errors in the Hover and Helix phases occur during the transient while the vehicle accelerates from rest to the trajectory. They do not indicate steady-state divergence.
-- Figure-8 errors are higher because this trajectory has larger accelerations (desired acceleration up to 2.5 times that of the helix), requiring more aggressive tilt corrections.
-- Average thrust of 15.27 N is approximately 1.04 times the hover thrust, confirming that the controller stays near hover for all phases, consistent with the paper's 22 degree maximum tilt result.
-- Lyapunov stability is analytically guaranteed by the following condition (Eq. 46 of the base paper).
-
-$$
-\dot{V} = z_x^\top A_x z_x + z_v^\top A_v z_v + z_t^\top A_t z_t + z_r^\top A_r z_r \leq 0
-$$
-
-To reproduce these results:
-
-```powershell
-python track_error.py
-```
+`mock_mavlink_vehicle.py` behaves like ArduCopter for this sequence: parameters, modes, pre-arm checks, command ACKs, EKF start-up delay, and LAND with auto-disarm. Against it, the vehicle flew from (0, 0, 0.2) to (1, 1, 2) m in about 5 s with no overshoot (final error < 1 mm), then landed and disarmed.
 
 ---
 
 ## 6. Controller Gains
 
-| Parameter | Symbol | Value | Description |
+| Gain | Paper symbol | Value (paper Sec. IV) | Acts on |
 |---|---|---:|---|
-| Mass | $m$ | 1.5 kg | Vehicle mass |
-| Gravity | $g$ | 9.81 m/s² | Gravitational acceleration |
-| Position gain | $k_{pos}$ ($A_x$) | 2.0 | Drives position error to zero |
-| Velocity gain | $k_{vel}$ ($A_v$) | 1.5 | Drives velocity error to zero |
-| Tilt gain | $k_{tilt}$ ($A_t$) | 3.5 | Roll and pitch attitude correction |
-| Yaw gain | $k_{yaw}$ ($a_\psi$) | 2.5 | Heading error correction |
-| Rate damping | $k_{rate}$ ($A_r$) | 0.8 | Angular rate damping |
+| `k_x` | $A_x$ | −1 | position error $z_x$ |
+| `k_v` | $A_v$ | −3 | velocity error $z_v$ |
+| `k_t` | $A_t$ | −8 | thrust-vector error $z_t$ |
+| `k_r` | $A_r$ | −12 | rate error $z_r$ |
+| `k_phi` | $a_\varphi$ | −2 | heading error $z_\varphi$ |
+| `k_wz` | $a_{\omega z}$ | −12 | yaw-rate error $z_{\omega z}$ |
 
-### Safety Limits
-
-| Limit | Value |
-|---|---|
-| Max horizontal acceleration | 5.0 m/s² |
-| Max thrust | $2.5 mg \approx 36.8$ N |
-| Minimum altitude | 0.2 m |
+The same gains are used in every simulator. In code they are stored as positive numbers $k = -A$ (`PaperGains`). Thrust limits: $0.15\,mg \le T \le 2.5\,mg$; for the Crazyflie, 90 % of $4 k_f\,\mathrm{RPM}_{max}^2$.
 
 ---
 
 ## 7. System Architecture
 
 ```
-Windows Host
-|
-|-- run_gazebo_simulation.py     Main entry point (50 Hz control loop)
-|     |-- BacksteppingController Thrust and torque from backstepping law
-|     |-- SimulationRunner       Kinematics integration and UDP pose stream
-|     |-- file_listener_loop     Monitors target.txt for setpoint updates
-|
-|-- <mujoco_runner>.py           MuJoCo simulation runner (50 Hz control loop)
-|     |-- BacksteppingController Same controller, applied to MuJoCo dynamics
-|     |-- MuJoCo model (MJCF)    Rigid-body quadrotor model
-|
-|-- run_gazebo_bridge.py         WebSocket bridge and HTTP file server
-|     |-- WebSocket :8765        JSON telemetry to browser
-|     |-- HTTP :8080             Serves gazebo_visualizer.html
-|
-|-- set_target.py                CLI utility: write X Y Z to target.txt
+quadrotor_controller/            shared by every simulator
+  paper_controller.py   PaperBacksteppingController  (eqs. 24-54)
+  trajectory.py         paper helix, figure-8, C^4 mission, 5th-order reference model
+  guidance.py           ReferenceManager: target.txt commands, mode switching, avoidance
+  kalman_filter.py      SensorNoiseModel, KalmanFilter, AngularRateFilter
+  obstacle_avoidance.py LidarScan, ReactiveObstacleAvoider
+  dynamics.py           RigidBodyQuadrotor (RK4)
+  sim_core.py           PythonFlightSim (rigid body + controller + KF + guidance)
+  sitl_bridge.py        SITLBridge (MAVLink, NED/FRD <-> ENU/FLU)
+  config.py             config.yaml loader (strict cfg('a.b'), --config / --set, fallback parser)
+  units.py              unit conversions, MuJoCo / PyBullet array layouts
+  world_geometry.py     static world read from the MuJoCo model (used to build the PyBullet city)
+  world_builder.py      procedural city (config world.*) -> MuJoCo include + Gazebo SDF
+  gazebo_tools.py       WSL path / environment helpers for Gazebo
+  controller.py         quaternion utilities, decompose_attitude, simplified 2-step law (baseline)
 
-WSL2 Ubuntu
-|
-|-- gzserver / gzclient          Gazebo 11 physics and GUI (via VcXsrv X11)
-|-- UDP Listener :9090           Receives 6-DOF pose and updates the gz model
+run_mujoco_simulation.py     MuJoCo 500 Hz, actuators T + tau, mj_ray LiDAR
+run_pybullet_simulation.py   gym-pybullet-drones CF2X, physics 1 kHz / control 500 Hz, RPM mixer
+run_gazebo_wsl_native.py     inside WSL: PythonFlightSim -> gz model (Gazebo viewer)
+run_gazebo_simulation.py     on Windows: PythonFlightSim -> UDP 9090 -> wsl_sync_gazebo.py
+run_gazebo_bridge.py         PythonFlightSim or MAVLink -> WebSocket 8081 + HTTP 8080 dashboard
+run_ardupilot_sitl.py        paper controller over MAVLink (dronekit-sitl or --connect)
+mock_mavlink_vehicle.py      MAVLink quadrotor for offline tests
+run_web_dashboard.py         web backend: flight core + Gazebo output + JSON API (stdlib HTTP server)
+drone_dashboard.html         web front end: 3D city (three.js), live values, charts, route check, export
+web_vendor/                  bundled three.js r128 (offline)
+START_WEB_DASHBOARD.bat      Gazebo + web backend in WSL, browser on Windows
+track_error.py               paper experiments (Fig. 3, Fig. 4, mission) -> results/
+set_target.py                writes target.txt (read by every runner)
+config.yaml                  every tunable value (see Section 8)
+gazebo_env.py                exports the Gazebo settings for run_gazebo.sh
+generate_world.py            writes models/city.xml (MuJoCo/PyBullet) and models/quadrotor.world (Gazebo)
+gazebo_plugin/               udp_pose_plugin.cc - Gazebo model plugin: UDP pose -> model (build_gazebo_plugin.sh)
+models/gazebo_quadrotor.sdf  Gazebo drone model template inserted into the generated world
 ```
 
 ---
 
-## 8. Project Structure
+## 8. Configuration (`config.yaml`)
 
-```
-d:\Drones\
-│
-├── quadrotor_controller/          # Core Python controller package
-│   ├── __init__.py                # Public API
-│   ├── controller.py              # BacksteppingController + quaternion math
-│   ├── kalman_filter.py           # KalmanFilter + SensorNoiseModel + Estimator
-│   ├── obstacle_avoidance.py      # LiDAR Scan Model + Reactive APF Detour
-│   └── sitl_bridge.py             # SITLBridge — MAVLink & simulator bridge
-│
-├── models/
-│   ├── quadrotor.world            # Gazebo 11 SDF world
-│   ├── quadrotor.xml              # MuJoCo 3D City World & LiDAR sensors
-│   └── quadrotor.urdf             # PyBullet 6-DOF Quadrotor URDF
-│
-├── tests/
-│   ├── test_controller.py         # Unit tests — BacksteppingController
-│   ├── test_kalman_filter.py      # Unit tests — Kalman Filter & Noise Model
-│   ├── test_mujoco_sim.py         # Unit tests — MuJoCo physics & tracking
-│   ├── test_obstacle_avoidance.py # Unit tests — LiDAR & Reactive Avoidance
-│   ├── test_pybullet_sim.py       # Unit tests — PyBullet Aviary simulation
-│   └── test_sitl_bridge.py        # Unit tests — SITLBridge
-│
-├── run_mujoco_simulation.py       # ⭐ MuJoCo 3D City Sim (LiDAR + KF + Avoidance)
-├── run_pybullet_simulation.py     # ⭐ PyBullet City Sim (LiDAR + KF + Avoidance)
-├── run_gazebo_simulation.py       # Gazebo simulation runner (WSL2 bridge)
-├── run_gazebo_bridge.py           # WebSocket telemetry bridge server
-├── gazebo_visualizer.html         # Real-time 3D web telemetry dashboard
-├── set_target.py                  # CLI target setter utility
-├── track_error.py                 # Pure Python 50 Hz trajectory error tracker
-├── launch_gazebo_wsl.py           # Launches Gazebo inside WSL2
-├── run_gazebo.sh                  # Bash launcher (inside WSL Ubuntu)
-│
-├── START_MUJOCO_SIM.bat           # 1-click MuJoCo 3D City simulator launcher
-├── START_PYBULLET_SIM.bat         # 1-click PyBullet 3D City simulator launcher
-├── START_GAZEBO_GUI.bat           # 1-click Gazebo simulator launcher
-├── launch_web_visualizer.bat      # 1-click web visualizer launcher
-│
-├── GAZEBO_INSTALLATION_GUIDE.md   # Full Gazebo 11 + WSL2 setup guide
-└── Trajectory_tracking_control... # Reference research paper (PDF)
-```
+No tunable value is written in the code. Every setting lives in **`config.yaml`** in the project folder, grouped in sections:
 
----
-
-## 9. Mathematical Formulation Summary
-
-| Symbol | Definition |
+| Section | Contents |
 |---|---|
-| $q = (w, x, y, z)^\top$ | Unit quaternion, $\|q\| = 1$ |
-| $q_{xy}$ | Tilt quaternion, encodes thrust direction |
-| $q_z$ | Heading quaternion, encodes yaw |
-| $q = q_{xy} \otimes q_z$ | Decoupled parametrization (base paper Eq. 5) |
-| $z_x = x - x_T$ | Position tracking error |
-| $z_v = v - v_d$ | Velocity error |
-| $z_t = T - T_d$ | Thrust vector error |
-| $\hat{z}_{act} \times \hat{z}_{des}$ | Tilt attitude error in $\mathbb{R}^3$ |
-| $\psi_{err} = \mathrm{wrap}(\psi_{ref} - \psi)$ | Yaw error |
-| $V = V_x + V_v + V_t + V_\omega$ | Composite Lyapunov function |
+| `paths` | target file, results folder, MuJoCo model (also the PyBullet city), Gazebo world, gym-pybullet-drones folder |
+| `vehicle` | mass, inertia, gravity, drag, thrust limits |
+| `controller` | the paper's gains (k = −A) and numerical guards |
+| `baseline_controller` | the old simplified 2-step law (for comparison) |
+| `noise`, `estimator` | sensor noise σ, Kalman filter Q, gyro filter α |
+| `trajectory`, `reference_model` | helix (Fig. 4), figure-8, mission timing, set-point reference model |
+| `guidance`, `avoidance` | target.txt polling, landing point, carrot / offset avoidance, LiDAR avoider |
+| `mujoco`, `pybullet`, `python_sim`, `gazebo`, `bridge` | simulator rates, cameras, HUD, WSL/Pixi/VcXsrv paths, ports |
+| `mavlink`, `mock_vehicle` | MAVLink connection, hover throttle, target, stand-in vehicle |
+| `experiments` | `track_error.py` (Fig. 3 commands, Fig. 4 duration, plots, paper reference values) |
+| `logging`, `numerics` | print/CSV periods, banner width, tolerances |
 
-The complete closed-loop Lyapunov derivative satisfies:
+- Change a value permanently by editing `config.yaml`.
+- Change it for one run with `--set`, e.g. `python run_mujoco_simulation.py --set controller.k_x=1.5 --set noise.pos_std=0.1`.
+- Use another file with `--config my_setup.yaml`, or set the `DRONES_CONFIG` environment variable.
+- Look-ups are strict: a missing key stops the program with a message naming the key, so there are no hidden defaults.
+- The `.bat` and `.sh` launchers find their own folder, so the project can live anywhere, not only `D:\Drones`. Set `DRONES_PYTHON` to choose a specific Python.
+- `tests/test_config.py` fails if a number is hard-coded again.
 
-$$
-\dot{V} = z_x^\top A_x z_x + z_v^\top A_v z_v + z_t^\top A_t z_t + z_r^\top A_r z_r \leq 0
-$$
-
-with $A_x, A_v, A_t, A_r < 0$, which establishes asymptotic stability (Eq. 46, base paper).
+Physical unit conversions and the array layouts of MuJoCo and PyBullet are named constants in `quadrotor_controller/units.py`.
 
 ---
 
-## 10. Prerequisites and Installation
-
-### System Requirements
+## 9. Prerequisites and Installation
 
 | Component | Requirement |
 |---|---|
-| OS | Windows 10 / 11 with WSL2 |
-| WSL2 | Ubuntu 22.04 LTS |
-| Python | 3.9+ (Windows side) |
-| X11 Server | VcXsrv |
-| Simulator 1 | Gazebo 11 (via Pixi in WSL) |
-| Simulator 2 | MuJoCo (Python bindings) |
-
-### Step 1: Install VcXsrv
-
-```powershell
-winget install marha.VcXsrv
-```
-
-Launch XLaunch with the following settings: Multiple Windows, Display 0, Disable access control enabled.
-
-### Step 2: Install WSL2 Ubuntu
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-### Step 3: Install Gazebo 11 via Pixi (inside WSL)
-
-```bash
-curl -fsSL https://pixi.sh/install.sh | bash && source ~/.bashrc
-pixi global install gazebo
-```
-
-### Step 4: Install OpenGL and X11 libraries (WSL)
-
-```bash
-sudo apt-get update && sudo apt-get install -y \
-  build-essential mesa-utils libgl1-mesa-dri \
-  libgl1-mesa-glx libglx-mesa0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4
-```
-
-### Step 5: Install Python dependencies (Windows)
+| OS | Windows 10/11 (WSL2 Ubuntu 22.04 for Gazebo) |
+| Python | 3.9+ |
+| Packages | `numpy mujoco pybullet gymnasium websockets matplotlib pymavlink` (`dronekit-sitl` optional) |
+| gym-pybullet-drones | used directly from `gym_pybullet_drones_repo` (`paths.gym_pybullet_drones`); optional `pip install -e gym_pybullet_drones_repo --no-deps` |
+| Gazebo | Gazebo 11 via Pixi inside WSL + VcXsrv (see [`GAZEBO_INSTALLATION_GUIDE.md`](GAZEBO_INSTALLATION_GUIDE.md)) |
 
 ```powershell
 cd d:\Drones
-python -m venv .venv
-.venv\Scripts\activate
-pip install pymavlink websockets mujoco
+pip install numpy mujoco pybullet gymnasium websockets matplotlib pymavlink pytest pyyaml
+pip install -e gym_pybullet_drones_repo --no-deps   # optional; --no-deps avoids torch / pybullet 3.2.7 builds
 ```
 
-Note: `pymavlink` is optional. The simulation runs in pure-Python mock mode without it. The `mujoco` package is required only for the MuJoCo simulation.
-
-See [`GAZEBO_INSTALLATION_GUIDE.md`](GAZEBO_INSTALLATION_GUIDE.md) for the full setup walkthrough.
+Inside WSL, the Gazebo Python (`gazebo.pixi_env`/bin/python3) needs `numpy`. PyYAML is optional there, because `config.py` has a built-in parser for `config.yaml`.
 
 ---
 
-## 11. How to Run
+## 10. How to Run
 
-### Option A: One-Click GUI Launch
-
-Double-click `START_GAZEBO_GUI.bat`. It automatically starts VcXsrv, launches Gazebo 11, and runs the controller.
-
-### Option B: Manual Launch
-
-Terminal 1, start the simulation:
-
-```powershell
-cd d:\Drones
-python run_gazebo_simulation.py
-```
-
-Terminal 2, start the web visualizer (optional):
-
-```powershell
-python run_gazebo_bridge.py
-```
-
-Open `http://localhost:8080` in a browser.
-
-### Option C: Custom Target at Launch
-
-```powershell
-python run_gazebo_simulation.py 5 5 10
-```
-
-The vehicle flies immediately to X = 5 m, Y = 5 m, Z = 10 m.
-
-### Option D: MuJoCo Simulation
-
-```powershell
-python <mujoco_runner>.py
-```
-
-Replace `<mujoco_runner>.py` with the MuJoCo entry-point script of the repository.
-
----
-
-## 12. Flight Modes
-
-### Trajectory Mode (Automatic, 40-second repeating cycle)
-
-| Phase | Time | Description |
-|---|---|---|
-| Hover | 0 - 4 s | Stabilize at (0, 0, 2 m) |
-| Helical Spiral | 4 - 22 s | Circular orbit of radius 2 m with altitude oscillation (matches paper Fig. 4) |
-| 3D Figure-8 | 22 - 40 s | Lemniscate of Bernoulli in 3D space |
-
-### Target Setpoint Mode
-
-The vehicle flies to and holds a custom (X, Y, Z) coordinate. This mode is activated by `set_target.py` or a CLI argument.
-
----
-
-## 13. Setting a Custom Target
-
-```powershell
-# Fly to X=5 m, Y=5 m, Z=10 m
-python set_target.py 5 5 10
-
-# Fly to negative coordinates
-python set_target.py -3 2 5
-
-# Resume automatic trajectory
-python set_target.py auto
-```
-
-The utility writes to `target.txt`, and the simulation polls it every 500 ms. No restart is required.
-
----
-
-## 14. API Reference
-
-### BacksteppingController
-
-```python
-from quadrotor_controller import BacksteppingController, ControllerState, ControllerReference
-
-controller = BacksteppingController(mass=1.5, gravity=9.81)
-
-state = ControllerState(
-    position=(x, y, z),
-    velocity=(vx, vy, vz),
-    quaternion=(w, x, y, z),    # unit quaternion
-    angular_rate=(wx, wy, wz),
-)
-
-reference = ControllerReference(
-    position=(rx, ry, rz),
-    velocity=(rvx, rvy, rvz),
-    acceleration=(rax, ray, raz),
-    heading=0.0,                 # yaw in radians
-)
-
-thrust, torques = controller.compute_command(state, reference, dt=0.02)
-# thrust  -> scalar, in Newtons
-# torques -> (roll_torque, pitch_torque, yaw_torque)
-```
-
-### Quaternion Utilities
-
-```python
-from quadrotor_controller import (
-    quaternion_from_euler,   # (roll, pitch, yaw) -> (w, x, y, z)
-    normalize_quaternion,    # q -> unit quaternion
-    decompose_attitude,      # q -> (q_xy, q_z) tilt/heading split
-)
-```
-
-### SITLBridge (Optional MAVLink)
-
-```python
-from quadrotor_controller import SITLBridge
-
-bridge = SITLBridge(connection_string="udp:127.0.0.1:14550")
-bridge.connect(timeout=10.0)
-bridge.set_mode("GUIDED")
-bridge.arm_vehicle(arm=True)
-target = bridge.build_attitude_target(thrust=14.7, roll=0.0, pitch=0.05, yaw=0.0, yaw_rate=0.0)
-bridge.send_attitude_target(target)
-bridge.disconnect()
-```
-
----
-
-## 14. MuJoCo 3D Simulation, Sensor Noise & Kalman Filter
-
-In addition to Gazebo 11, the project includes a standalone **MuJoCo 3D Physics Simulation** ([`run_mujoco_simulation.py`](file:///d:/Drones/run_mujoco_simulation.py)) running at 500 Hz with native hardware OpenGL (WGL):
-
-- **Airport Flight Arena**: Helipad with markings, obstacle towers, slalom racing gates, daylight lighting, and dynamic mocap target beacon.
-- **Sensor Noise Model (`SensorNoiseModel`)**:
-  - Injects zero-mean Gaussian white noise into sensor readings:
-    - Position noise: $\sigma_{pos} = 0.05\text{ m}$ (GPS/Mocap variance)
-    - Velocity noise: $\sigma_{vel} = 0.08\text{ m/s}$ (Doppler/optical flow variance)
-    - Gyroscope rate noise: $\sigma_{\omega} = 0.02\text{ rad/s}$ (~$1.1^\circ/\text{s}$ IMU variance)
-- **Discrete-Time Kalman Filter (`KalmanFilter` / `QuadrotorStateEstimator`)**:
-  - 6-DOF double-integrator state vector $\mathbf{x} = [p_x, p_y, p_z, v_x, v_y, v_z]^T$.
-  - Continuous-to-discrete white noise acceleration process covariance $\mathbf{Q}(\Delta t)$.
-  - Joseph stabilized covariance update $\mathbf{P} = (\mathbf{I} - \mathbf{K}\mathbf{H})\mathbf{P}(\mathbf{I} - \mathbf{K}\mathbf{H})^T + \mathbf{K}\mathbf{R}\mathbf{K}^T$.
-  - 3D Angular Rate low-pass/Kalman damping filter (`AngularRateFilter`).
-  - Denoises the feedback before the Backstepping controller, cutting tracking jitter by $>50\%$.
-
-```powershell
-# Run with sensor noise & Kalman filter in 3D interactive viewer
-python run_mujoco_simulation.py
-
-# Compare performance without the filter (raw noisy state)
-python run_mujoco_simulation.py --no-filter
-
-# Run headless automated verification
-python run_mujoco_simulation.py --headless --duration 10.0
-```
-
----
-
-## 15. gym-pybullet-drones 3D Simulation
-
-The project also provides complete support for **gym-pybullet-drones** ([`run_pybullet_simulation.py`](file:///d:/Drones/run_pybullet_simulation.py)), utilizing the official `CtrlAviary` environment and PyBullet physics engine:
-
-- **Physics Engine**: `gym_pybullet_drones.envs.CtrlAviary` at 250 Hz (`pyb_freq=250`, `ctrl_freq=250`).
-- **Motor Mixer (`ForceTorqueMixer`)**: Inverts the quadrotor force-torque allocation matrix to map continuous Lyapunov thrust $T$ and body torques $\boldsymbol{\tau}$ into individual motor RPMs:
-  $$\begin{bmatrix} T \\ \tau_x \\ \tau_y \\ \tau_z \end{bmatrix} = \begin{bmatrix} 1 & 1 & 1 & 1 \\ -d & -d & d & d \\ -d & d & d & -d \\ -c & c & -c & c \end{bmatrix} \begin{bmatrix} F_0 \\ F_1 \\ F_2 \\ F_3 \end{bmatrix}, \quad \text{RPM}_i = \sqrt{\frac{F_i}{k_f}}$$
-- **Integrated Kalman Filter & Noise**: Fuses [`SensorNoiseModel`](file:///d:/Drones/quadrotor_controller/kalman_filter.py#L11) with the discrete [`KalmanFilter`](file:///d:/Drones/quadrotor_controller/kalman_filter.py#L70) state estimator to denoise Crazyflie state observations before backstepping control.
-- **Flight Modes**: Full automated 3D trajectory tracking (Takeoff $\rightarrow$ Helical Spiral $\rightarrow$ Figure-8) and real-time custom waypoint redirection via `python set_target.py X Y Z`.
-
-```powershell
-# Run with PyBullet 3D interactive GUI (Noise + Kalman Filter enabled)
-python run_pybullet_simulation.py
-# Or 1-click launcher
-START_PYBULLET_SIM.bat
-
-# Compare with raw noisy feedback (no Kalman filter)
-python run_pybullet_simulation.py --no-filter
-
-# Run headless automated test
-python run_pybullet_simulation.py --headless --duration 5.0
-```
-
----
-
-## 16. 3D Urban City Environment & Reactive LiDAR Obstacle Avoidance
-
-Both the **MuJoCo** and **gym-pybullet-drones** simulations include a realistic **Urban City World** equipped with real-time multi-beam LiDAR sensors and reactive path replanning:
-
-### 1. 3D Urban City Architecture
-- **Skyscrapers & High-Rises**: 14m Metropolitan Glass Tower with antenna beacon, 12m Financial Center with stepped setbacks, 10m Corporate Tech Complex, and 8.5m Residential Plaza Condominiums.
-- **Flight Corridor Obstacle Blocks**: Strategically placed building blocks (heights 1.8m to 3.2m) directly challenging urban flight corridors.
-- **Road Network & Helipad**: Dual 4-lane asphalt avenues with yellow/white dividing lines, sidewalk curbs, streetlamps, and central elevated helipad plaza.
-- **Urban Foliage**: Avenue trees with canopy foliage and roadside urban props.
-
-### 2. 10-Beam Omnidirectional LiDAR Sensing
-- **8 Horizontal 360° Raycast Beams**: Covering $0^\circ$ (Forward), $45^\circ$, $90^\circ$ (Left), $135^\circ$, $180^\circ$ (Rear), $225^\circ$, $270^\circ$ (Right), $315^\circ$ with up to 8.0m detection range.
-- **2 Vertical Clearance Beams**: Upward ceiling clearance ($+Z$) and downward ground proximity ($-Z$).
-- **Physics Hardware Emulation**: Implemented natively via `<rangefinder>` in MuJoCo (`d.sensordata`) and `p.rayTestBatch()` in PyBullet.
-
-### 3. Reactive Path Replanning & Detour Control
-- **Artificial Potential Field (APF)**: Computes a repulsive vector pushing radially outward from detected building blocks:
-  $$\vec{F}_{rep} = \sum_{i, d_i < d_{safe}} k_{rep} \left(\frac{d_{detect} - d_i}{d_{detect} - d_{safe}}\right)^{1.5} (-\hat{u}_i)$$
-- **Tangential Wall Circulation**: Adds an orthogonal circulation vector $\vec{F}_{circ} = \hat{z} \times \vec{F}_{rep}$ aligned with the mission goal. This guides the drone smoothly *around* building corners and canyon walls, preventing it from freezing or oscillating in local minima.
-- **Dynamic Waypoint / Velocity Blend**: Blends avoidance velocity with trajectory velocity $\vec{v}_{safe} = (1 - w)\vec{v}_{goal} + w\vec{v}_{avoid}$ to steer around the building and resume navigation once clear.
-
----
-
-## 17. Running Tests
-
-```powershell
-cd d:\Drones
-python -m pytest tests/ -v
-```
-
-| Test | Description |
+| What | Command |
 |---|---|
-| `test_normalize_quaternion` | Verifies $\|q\| = 1$ after normalization |
-| `test_decompose_attitude_recombines_to_original_quaternion` | Validates $q_{xy} \otimes q_z = q$ (Eq. 5, base paper) |
-| `test_controller_returns_positive_thrust_and_three_torques` | Output shape, type, and sign correctness |
-| `test_kalman_filter_dimensions_and_reset` | Validates KF matrix shapes ($\mathbf{F}, \mathbf{B}, \mathbf{Q}, \mathbf{P}$) and reset |
-| `test_kalman_filter_noise_suppression` | Confirms $>40\%$ RMSE noise reduction over raw sensor telemetry |
-| `test_sensor_noise_statistics` | Verifies Gaussian noise mean $\approx 0$ and variance $\approx \sigma^2$ |
-| `test_mujoco_with_noise_and_kalman_filter` | End-to-end MuJoCo physics stepping with noise + Kalman filter |
-| `test_pybullet_env_initialization` | Validates `gym-pybullet-drones` `CtrlAviary` environment loading |
-| `test_force_torque_mixer` | Verifies force-to-RPM mixing matrix inversion for hover thrust |
-| `test_pybullet_step_with_noise_and_kalman_filter` | End-to-end PyBullet stepping with backstepping control, noise & KF |
-| `test_lidar_scan_properties` | Validates 10-beam LiDAR reading distances and closest sector index |
-| `test_obstacle_avoider_clear_path` | Confirms nominal trajectory is unaltered when distance $> 2.2\text{m}$ |
-| `test_obstacle_avoider_head_on_repulsion_and_detour` | Verifies front obstacle triggers repulsive braking and lateral detour |
-| `test_obstacle_avoider_multidirectional_building_corner` | Verifies lateral steering away from buildings along side flanks |
+| MuJoCo 3D viewer | `START_MUJOCO_SIM.bat` or `python run_mujoco_simulation.py` |
+| PyBullet 3D GUI | `START_PYBULLET_SIM.bat` or `python run_pybullet_simulation.py` |
+| Gazebo 11 (WSL) | `START_GAZEBO_GUI.bat` (recommended) or `python run_gazebo_simulation.py` |
+| **3D web dashboard + Gazebo** | `START_WEB_DASHBOARD.bat` (Gazebo + backend in WSL, opens http://localhost:8090) |
+| 3D web dashboard, backend on Windows | `python run_web_dashboard.py --gazebo --open-browser`, or without Gazebo `python run_web_dashboard.py --open-browser` |
+| Old telemetry page (MAVLink) | `launch_web_visualizer.bat`, then open http://127.0.0.1:8080/gazebo_visualizer.html |
+| ArduPilot SITL | start SITL (`sim_vehicle.py -v ArduCopter --out udp:127.0.0.1:14550`), then `python run_ardupilot_sitl.py --connect`; or `--launch dronekit` |
+| Offline MAVLink demo | `python mock_mavlink_vehicle.py` and, in a second terminal, `python run_ardupilot_sitl.py --connect` |
+| Regenerate the city | `python generate_world.py` (after changing `config.yaml` → `world`) |
+| Build the Gazebo pose plugin | in WSL: `bash build_gazebo_plugin.sh` (done automatically by `run_gazebo.sh`) |
+| Paper experiments + plots | `python track_error.py` |
+| Tests | `python -m pytest tests -v` |
+
+Useful options for MuJoCo / PyBullet: `--headless --duration 60`, `--log run.csv`, `--no-noise`, `--no-filter`, `--no-avoid`, `--seed N`, `--ignore-target-file`, `--config file.yaml`, `--set key=value`.
+
+### Simulation world and viewer controls
+
+All three simulators fly in the same procedurally generated city (`config.yaml` → `world`, seed 7). It contains a central plaza with a helipad and three avoidance-demo obstacles (clock tower, café, metro entrance), a ring road and avenues with lane markings and zebra crossings, sidewalks with trees, street lamps and traffic lights, parked cars, and 2- to 15-storey buildings with window bands, roof units and antenna beacons. The world has 1307 primitives, 237 of them solid.
+
+PyBullet viewer (normal 1280×720 window, side panels hidden, shadows on, live values in the top-left corner):
+
+| Key | Action |
+|---|---|
+| `1` / `2` / `3` | follow drone / overview / top view |
+| `4` | trail on / off |
+| arrows | rotate / tilt the camera |
+| `=` / `-` | zoom |
+| mouse | Ctrl + left-drag rotate, Ctrl + middle-drag pan, wheel zoom |
+
+MuJoCo: the side panels are hidden (`mujoco.show_side_panels`). The viewer has a flight trail and a HUD; mouse drag rotates the view and the wheel zooms.
+
+### Commands while flying (`set_target.py`)
+
+```powershell
+python set_target.py auto          # takeoff -> hover -> paper helix -> figure-8 (looping)
+python set_target.py spiral        # paper helix (Fig. 4)
+python set_target.py figure8       # figure-8
+python set_target.py 5 5 10        # fly to a point (C^4 reference model)
+python set_target.py 3 -2 2.5 90   # point + heading in degrees
+python set_target.py hover         # hold (0, 0, 1 m)
+python set_target.py land          # return to the helipad
+```
+
+The runners poll `target.txt` every 0.25 s; every mode change is smooth, with no jumps in the reference.
 
 ---
 
-## 18. Key Observations
+## 11. Running Tests
 
-1. The quaternion decoupling $q = q_{xy} \otimes q_z$ allows translational and yaw dynamics to be controlled by two independent laws, each with its own Lyapunov stability proof.
-2. Computing the tilt error as $\hat{z}_{actual} \times \hat{z}_{desired}$ in $\mathbb{R}^3$ guarantees the shortest-angle rotation and avoids the unwinding phenomenon without any sign-flip logic on the quaternion.
-3. The helical trajectory period times ($T_{xy} = 6.25$ s, $T_z = 12.5$ s) are taken directly from the paper's experimental flight in Fig. 4 and reproduced exactly in the simulation.
-4. Scalar gains are used in place of the paper's matrix gains ($A_x = -I$, $A_v = -3I$, $A_t = -8I$, $A_r = -12I$). This is a standard simplification when hardware inertia parameters are not available.
-5. The 50 Hz control-loop rate matches the telemetry rate reported in the paper's experimental setup (Vicon data at 50 Hz to the quadrotor via radio link).
-6. The same controller and gains operate in both Gazebo, MuJoCo, and PyBullet without structural changes.
-7. State estimation via the discrete Kalman Filter successfully attenuates sensor noise, ensuring smooth Lyapunov backstepping torque commands without motor chatter.
+`python -m pytest -v` runs 56 tests (`pytest.ini` limits collection to `tests/`). The main groups:
 
----
-
-## 19. Limitations
-
-- Aerodynamic drag $f(v)$ is not modeled (set to zero in the simulation).
-- The inertia tensor $J$ and the gyroscopic coupling term $-J\omega \times \omega$ are simplified with rate damping $k_{rate}$.
-- The dynamic thrust extension ($\ddot{T} = u_T$, Eq. 31 of the paper) is omitted. Thrust is computed algebraically.
-- The full 4-step backstepping cascade (position, velocity, thrust error, angular velocity error) is reduced to a 2-step proportional-derivative computation.
+| Test file | What it checks |
+|---|---|
+| `test_paper_controller.py` | eq. (24) heading kinematics vs finite differences; hover equilibrium T = mg, τ = 0; sub-mm helix tracking; heading ±1 rad; the Lyapunov function never increases (eq. 46); drag compensation; thrust limits |
+| `test_trajectory_guidance.py` | Fig. 4 helix parameters; derivatives up to snap; C⁴ mission joints and speed bound; reference model convergence and speed limit; target.txt parsing; continuous mode switching; avoider side memory |
+| `test_mujoco_sim.py` | model, stepping, paper controller flying MuJoCo to a point under real dynamics |
+| `test_pybullet_sim.py` | CtrlAviary, mixer, paper controller hovering the Crazyflie at 1 m |
+| `test_mavlink_preflight.py` | full MAVLink pre-flight against the mock ArduCopter: streams, MOT_THST_HOVER, GUID_OPTIONS, EKF, GUIDED, arm, land and disarm |
+| `test_path_planner.py` | LiDAR ray cast on the city map, routes free of obstacles, target inside a building moved out, Gazebo flight core reaches (12, 10, 9) without touching anything |
+| `test_web_dashboard.py` | web API, route check (between buildings / target moved / over the top), export with one row per second |
+| `test_config.py` | config loading, `--set` / `--config` overrides, fallback parser = PyYAML, **no hard-coded numbers in the code** |
+| `test_kalman_filter.py`, `test_obstacle_avoidance.py`, `test_sitl_bridge.py`, `test_controller.py` | noise, KF, LiDAR, MAVLink and frame conversions, quaternion utilities |
 
 ---
 
-## 18. Future Work
+## 12. Key Observations
 
-- Add the full inertia tensor and gyroscopic feedforward term.
-- Implement the complete 4-step backstepping Lyapunov cascade with matrix gains.
-- Include an aerodynamic drag model $f(v)$ identified from flight data.
-- Extend to adaptive gain tuning to handle unknown or time-varying parameters.
-- Port the controller to ArduPilot or PX4 via the existing `SITLBridge` MAVLink interface.
-- Add realistic IMU sensor noise and an attitude estimator (for example, a Mahony filter).
-- Implement full ROS 2 integration for SLAM and obstacle avoidance.
+1. The decomposition $q = q_{xy}\otimes q_z$ makes position and heading independent: the heading follows ±1 rad during the helix with practically zero error, and position tracking is unaffected.
+2. The full 4-step law, with the dynamic thrust extension and analytic derivatives, is about 20–40× more accurate than the 2-step PD simplification with the same structure.
+3. The law needs a C⁴ reference. Blending moving trajectories directly produced speed overshoots (3.1 m/s); rest-to-rest speed ramps fixed this.
+4. Feeding the model acceleration to the Kalman filter is essential: without it the filter lags (11.5 cm error); with it the error is 0.65 cm and the motor commands are about 80× smoother.
+5. Unmodelled drag-like effects show up directly as tracking error (PyBullet damping: 8 cm). The paper's $f(v)$ term compensates for them when modelled.
+
+## 13. Limitations
+
+- Gazebo is used as a viewer for the Python rigid-body physics (the quadrotor model is kinematic).
+- Rotor dynamics are not modelled; the motors are assumed to reach the commanded thrust and torques instantly, as in the paper.
+- Drag is linear ($f(v) = -c v$) and set to 0 by default.
+- ArduPilot was tested against a MAVLink stand-in vehicle; real ArduCopter SITL still has to be run on Windows/WSL.
+- Obstacle avoidance is reactive (LiDAR); targets closer to a building than the safety distance are held at that distance.
+
+## 14. Future Work
+
+- Uneven terrain (heightfield ground) with terrain-following and landing on slopes.
+- Attitude estimation from IMU (EKF / Mahony) instead of the true quaternion.
+- Adaptive extension for unknown mass and drag (mentioned by the paper's authors).
+- Run on real ArduCopter SITL and hardware through `SITLBridge`.
+
+## 15. Conclusion
+
+The project implements the complete backstepping trajectory-tracking controller of De Monte and Lohmann (2013): the decoupling quaternion parametrisation, the dynamic thrust extension, the four-step position design with its Lyapunov proof, and the independent heading control. It reproduces the paper's set-point (Fig. 3) and vertical-helix (Fig. 4) experiments with sub-centimetre accuracy. The same controller, gains, sensor noise model and Kalman filter fly a 1.5 kg quadrotor in MuJoCo and a 27 g Crazyflie in PyBullet under real rigid-body dynamics, drive the Gazebo viewer and the web dashboard, and command a MAVLink vehicle.
 
 ---
 
-## 19. Conclusion
+## 16. References
 
-This project implements and validates, in Gazebo 11 and MuJoCo simulations, a complete real-time backstepping trajectory tracking controller for a quadrotor, based on the decoupled quaternion parametrization of De Monte and Lohmann (2013). The core design choices, namely the unit quaternion attitude representation, the tilt and heading decomposition ($q = q_{xy} \otimes q_z$), and the $\mathbb{R}^3$ cross-product attitude error, are reproduced faithfully from the paper and produce stable trajectory tracking in the Helical Spiral and Figure-8 maneuvers. The helix trajectory period parameters match the paper's experimental setup exactly. The WebSocket telemetry bridge and live browser visualizer provide real-time monitoring of all state variables, and the `set_target.py` utility allows interactive re-tasking of the vehicle without restarting the simulation.
-
----
-
-## 20. References
-
-1. P. De Monte and B. Lohmann, "Trajectory Tracking Control for a Quadrotor Helicopter based on Backstepping using a Decoupling Quaternion Parametrization," 21st Mediterranean Conference on Control and Automation (MED), Crete, Greece, June 2013. IEEE. (Base paper)
-
-2. M. Krstic, I. Kanellakopoulos, and P. Kokotovic, Nonlinear and Adaptive Control Design, John Wiley & Sons, 1995. (Backstepping foundations)
-
+1. P. De Monte and B. Lohmann, "Trajectory Tracking Control for a Quadrotor Helicopter based on Backstepping using a Decoupling Quaternion Parametrization," 21st Mediterranean Conference on Control and Automation (MED), Crete, Greece, June 2013, pp. 507-512. IEEE. (Base paper)
+2. M. Krstic, I. Kanellakopoulos, and P. Kokotovic, Nonlinear and Adaptive Control Design, John Wiley & Sons, 1995.
 3. S. P. Bhat and D. S. Bernstein, "A topological obstruction to continuous global stabilization of rotational motion and the unwinding phenomenon," Systems & Control Letters, vol. 39, pp. 63-70, 2000.
-
-4. O. Fritsch, P. De Monte, M. Buhl, and B. Lohmann, "Quasi-static feedback linearization for the translational dynamics of a quadrotor helicopter," Proceedings of the American Control Conference, 2012.
-
-5. T. Hamel, R. Mahony, R. Lozano, and J. Ostrowski, "Dynamic modelling and configuration stabilization for an X4-Flyer," Proceedings of the 15th IFAC World Congress, 2002.
-
-6. E. Todorov, T. Erez, and Y. Tassa, "MuJoCo: A physics engine for model-based control," IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 2012.
+4. O. Fritsch, P. De Monte, M. Buhl, and B. Lohmann, "Quasi-static feedback linearization for the translational dynamics of a quadrotor helicopter," Proc. American Control Conference, 2012.
+5. T. Hamel, R. Mahony, R. Lozano, and J. Ostrowski, "Dynamic modelling and configuration stabilization for an X4-Flyer," Proc. 15th IFAC World Congress, 2002.
+6. E. Todorov, T. Erez, and Y. Tassa, "MuJoCo: A physics engine for model-based control," IEEE/RSJ IROS, 2012.
+7. J. Panerati et al., "Learning to Fly - a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi-agent Quadcopter Control," IEEE/RSJ IROS, 2021. (gym-pybullet-drones)

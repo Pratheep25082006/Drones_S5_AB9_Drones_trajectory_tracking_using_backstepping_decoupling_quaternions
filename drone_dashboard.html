@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quadrotor 3D Dashboard</title>
+<!-- Front end of run_web_dashboard.py (backend: PythonFlightSim + paper controller, streamed to Gazebo).
+     Served by the backend; settings come from config.yaml -> web (injected below). -->
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --surface-3: #2e2e2b;
+    --border: #3a3a36;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --series-1: #3987e5;   /* actual */
+    --series-2: #d95926;   /* reference */
+    --series-3: #199e70;   /* planned route */
+    --series-4: #c98500;   /* route preview */
+    --good: #2fa36b;
+    --warning: #d9a400;
+    --critical: #e66767;
+    --accent: #3987e5;
+    --radius: 8px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text-primary);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+  #view { position: relative; flex: 1 1 auto; min-width: 0; }
+  #view canvas { display: block; }
+  #side { flex: 0 0 440px; height: 100%; overflow-y: auto; background: var(--surface-1);
+    border-left: 1px solid var(--border); padding: 12px 14px 24px; }
+  @media (max-width: 900px) {
+    #app { flex-direction: column; height: auto; }
+    #view { height: 62vh; flex: none; }
+    #side { flex: none; width: 100%; height: auto; border-left: 0; border-top: 1px solid var(--border); }
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .9px; color: var(--text-muted);
+    margin: 18px 0 8px; font-weight: 650; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
+  button, .btn { appearance: none; border: 1px solid var(--border); background: var(--surface-3); color: var(--text-primary);
+    border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex;
+    align-items: center; gap: 6px; }
+  button:hover, .btn:hover { border-color: #55554f; background: #383834; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: #4a95ee; }
+  button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=number] { width: 72px; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 6px; font: 13px var(--mono); }
+  label.f { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-muted); }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: var(--surface-3); color: var(--text-secondary); border: 1px solid var(--border); white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.good { background: var(--good); } .dot.bad { background: var(--critical); } .dot.warn { background: var(--warning); }
+  .sub { color: var(--text-muted); font-size: 11px; }
+  .grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; }
+  .grid .k { color: var(--text-muted); }
+  .grid .v { font-family: var(--mono); color: var(--text-primary); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phase { font-size: 14px; font-weight: 600; margin: 2px 0 6px; }
+  .verdict { border-left: 3px solid var(--text-muted); padding-left: 8px; margin: 4px 0 8px; }
+  .verdict.direct, .verdict.between, .verdict.around { border-color: var(--good); }
+  .verdict.over { border-color: var(--warning); }
+  .verdict.err { border-color: var(--critical); }
+  .verdict .ic { font-weight: 700; margin-right: 4px; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .chart { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 6px 2px; position: relative; }
+  .chart .t { font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between; gap: 6px; }
+  .chart .lg { display: flex; gap: 8px; font-size: 10px; color: var(--text-muted); }
+  .chart .lg i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 3px; }
+  .chart canvas { width: 100%; height: 92px; display: block; }
+  .tip { position: absolute; pointer-events: none; background: #0d0d0c; border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 7px; font: 11px var(--mono); color: var(--text-primary); white-space: nowrap; display: none; z-index: 5; }
+  /* overlays on the 3D view */
+  .ov { position: absolute; background: rgba(20,20,19,.86); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 6px; backdrop-filter: blur(4px); }
+  #toolbar { top: 10px; left: 10px; display: flex; gap: 4px; flex-wrap: wrap; max-width: calc(100% - 20px); }
+  #toolbar .sep { width: 1px; background: var(--border); margin: 0 3px; }
+  #toolbar button { padding: 5px 8px; font-size: 12px; }
+  #legend3d { bottom: 10px; left: 10px; font-size: 11px; color: var(--text-secondary); display: flex; gap: 12px; flex-wrap: wrap; }
+  #legend3d i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+  #hover3d { pointer-events: none; display: none; font: 11px var(--mono); color: var(--text-primary); }
+  #pickhint { top: 52px; left: 10px; font-size: 12px; display: none; border-color: var(--series-4); }
+  #offline { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,10,10,.6); font-size: 15px; z-index: 9; text-align: center; padding: 20px; }
+  #hud { top: 10px; right: 10px; font: 12px var(--mono); color: var(--text-primary); line-height: 1.55; }
+  #hud .k { color: var(--text-muted); }
+  .mini { font-size: 11px; padding: 4px 7px; }
+  table.rows { width: 100%; border-collapse: collapse; font: 11px var(--mono); margin-top: 6px; }
+  table.rows th, table.rows td { padding: 2px 4px; text-align: right; border-bottom: 1px solid var(--surface-3); }
+  table.rows th { color: var(--text-muted); font-weight: 500; position: sticky; top: 0; background: var(--surface-2); }
+  .tablewrap { max-height: 170px; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="toolbar" class="ov">
+      <button id="camOrbit" class="on" title="Free orbit camera (drag to rotate, right-drag to pan, wheel to zoom)">Orbit</button>
+      <button id="camFollow" title="Camera follows the drone">Follow</button>
+      <button id="camTop" title="Top view">Top</button>
+      <span class="sep"></span>
+      <button id="layBuildings" class="on" title="Buildings: solid / see-through / hidden">Buildings: solid</button>
+      <button id="layProps" class="on" title="Trees, lamps, benches, traffic lights">Props</button>
+      <button id="layCars" class="on">Cars</button>
+      <button id="layTrail" class="on">Trail</button>
+      <button id="layRoute" class="on">Route</button>
+      <span class="sep"></span>
+      <button id="pickBtn" title="Click the ground or a roof to choose a target">Pick target</button>
+    </div>
+    <div id="pickhint" class="ov">Click the ground (target at the height you set) or a roof (target above it). Esc to cancel.</div>
+    <div id="hud" class="ov"></div>
+    <div id="hover3d" class="ov"></div>
+    <div id="legend3d" class="ov">
+      <span><i style="background:var(--series-1)"></i>flown path</span>
+      <span><i style="background:var(--series-2)"></i>reference</span>
+      <span><i style="background:var(--series-3)"></i>planned route</span>
+      <span><i style="background:var(--series-4)"></i>route preview</span>
+      <span><i style="background:var(--critical);height:8px;width:8px;border-radius:50%"></i>target</span>
+    </div>
+    <div id="offline"><div><b>Backend not reachable.</b><br><span class="sub">Start it with START_WEB_DASHBOARD.bat or python run_web_dashboard.py. Retrying ...</span></div></div>
+  </div>
+
+  <aside id="side">
+    <div class="head">
+      <div>
+        <h1>Quadrotor backstepping - 3D dashboard</h1>
+        <div class="sub">De Monte &amp; Lohmann (2013) controller · Gazebo backend</div>
+      </div>
+      <span class="badge" id="conn"><span class="dot" id="connDot"></span><span id="connTxt">connecting</span></span>
+    </div>
+    <div class="sub" id="backendStatus" style="margin-top:4px"></div>
+
+    <h2>Target</h2>
+    <div class="card">
+      <div class="row">
+        <label class="f">X (m)<input type="number" id="tx" step="0.5" value="12"></label>
+        <label class="f">Y (m)<input type="number" id="ty" step="0.5" value="10"></label>
+        <label class="f">Z (m)<input type="number" id="tz" step="0.5" value="9"></label>
+        <label class="f">Heading (°)<input type="number" id="th" step="15" value="0"></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="checkBtn">Check route</button>
+        <button id="flyBtn" class="primary">Fly to target</button>
+        <label class="f" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto">Pick height
+          <input type="number" id="pickAlt" step="0.5"></label>
+      </div>
+      <div id="routeResult" style="margin-top:8px; display:none">
+        <div class="verdict" id="verdict"></div>
+        <div class="grid" id="routeGrid"></div>
+      </div>
+    </div>
+
+    <h2>Flight mode</h2>
+    <div class="row">
+      <button data-mode="auto">Auto mission</button>
+      <button data-mode="spiral">Paper helix</button>
+      <button data-mode="figure8">Figure-8</button>
+      <button data-mode="hover">Hover</button>
+      <button data-mode="land">Land</button>
+    </div>
+
+    <h2>Live trajectory values</h2>
+    <div class="card">
+      <div class="phase" id="phase">-</div>
+      <div class="grid" id="values"></div>
+    </div>
+
+    <h2>Charts (last <span id="histS"></span> s)</h2>
+    <div class="charts" id="charts"></div>
+
+    <h2>Export (one row per <span id="expP"></span> s)</h2>
+    <div class="card">
+      <div class="row">
+        <a class="btn" id="expCsv" href="/api/export.csv">Download CSV</a>
+        <a class="btn" id="expJson" href="/api/export.json">Download JSON</a>
+        <button id="clearLog" class="mini">Clear log</button>
+        <span class="sub" id="rowCount" style="margin-left:auto"></span>
+      </div>
+      <div class="sub" style="margin-top:6px">Every export is also saved in the project's <b>results</b> folder.
+        Columns: time, mode, position, reference, error, velocity, speed, roll/pitch/yaw, body rates, thrust, torques,
+        Kalman-filter error, sensor noise, Lyapunov value, goal, route, LiDAR status.</div>
+      <div class="tablewrap"><table class="rows" id="lastRows"></table></div>
+    </div>
+  </aside>
+</div>
+<div class="tip" id="tip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+const CFG = Object.assign({poll_ms: 50, chart_period_ms: 200, history_s: 60, trail_points: 3000,
+  pick_altitude: 3, roof_clearance: 2, setpoint_speed: 1.5, export_period: 1, clearance: 1.3}, /*WEB_CONFIG*/null || {});
+const $ = (id) => document.getElementById(id);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "-" : Number(v).toFixed(d);
+const vec = (a, d = 2) => a ? "(" + a.map(v => fmt(v, d)).join(", ") + ")" : "-";
+async function getJSON(p) { const r = await fetch(p, {cache: "no-store"}); if (!r.ok) throw new Error(r.status); return r.json(); }
+async function postJSON(p, body) { const r = await fetch(p, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); return r.json(); }
+
+$("histS").textContent = CFG.history_s; $("expP").textContent = CFG.export_period; $("pickAlt").value = CFG.pick_altitude;
+
+/* ------------------------------------------------------------------ 3D scene (z up = ENU) */
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+THREE.Object3D.DefaultUp.set(0, 0, 1);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 2000);
+camera.up.set(0, 0, 1);
+camera.position.set(-16, -18, 12);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 2);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.update();
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+
+const rgb = (a) => new THREE.Color(a[0], a[1], a[2]);
+let WORLD = null;
+const pickables = [];
+const layerGroups = {buildings: new THREE.Group(), props: new THREE.Group(), cars: new THREE.Group(), ground: new THREE.Group()};
+Object.values(layerGroups).forEach(g => scene.add(g));
+const buildings = [];        // {lo:[..], hi:[..]} solid building blocks (hover / roof picking)
+
+function category(name) {
+  if (/^(building|window|roof|ac_unit|water_tank|antenna|beacon)_/.test(name)) return "buildings";
+  if (/^car_/.test(name)) return "cars";
+  if (/^(ring_road|avenue|line_|zebra|plaza|helipad|sidewalk)/.test(name)) return "ground";
+  return "props";
+}
+
+async function loadWorld() {
+  WORLD = await getJSON("/api/world");
+  scene.background = rgb(WORLD.sky.horizon);
+  scene.fog = new THREE.Fog(rgb(WORLD.sky.horizon), WORLD.extent * 1.6, WORLD.ground_size * 1.2);
+  scene.add(new THREE.HemisphereLight(rgb(WORLD.sky.top), new THREE.Color(0x4a5a3a), 0.75));
+  const sun = new THREE.DirectionalLight(rgb(WORLD.sun.diffuse), 0.95);
+  const d = WORLD.sun.direction;
+  sun.position.set(-d[0] * 60, -d[1] * 60, -d[2] * 60);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(4096, 4096);
+  const e = WORLD.extent + 6;
+  Object.assign(sun.shadow.camera, {left: -e, right: e, top: e, bottom: -e, near: 1, far: 200});
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+
+  const grass = WORLD.materials.grass.rgba;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.ground_size * 2, WORLD.ground_size * 2),
+    new THREE.MeshStandardMaterial({color: rgb(grass), roughness: 1}));
+  ground.receiveShadow = true; ground.userData.kind = "ground";
+  scene.add(ground); pickables.push(ground);
+
+  const geo = {
+    box: new THREE.BoxGeometry(2, 2, 2),
+    cylinder: new THREE.CylinderGeometry(1, 1, 2, 20).rotateX(Math.PI / 2),
+    sphere: new THREE.SphereGeometry(1, 18, 12),
+  };
+  const groups = new Map();
+  for (const p of WORLD.prims) {
+    const cat = category(p.n);
+    const key = cat + "|" + p.k + "|" + p.m;
+    if (!groups.has(key)) groups.set(key, {cat, kind: p.k, mat: p.m, items: []});
+    groups.get(key).items.push(p);
+    if (/^building_/.test(p.n)) buildings.push({lo: [p.p[0] - p.s[0], p.p[1] - p.s[1], p.p[2] - p.s[2]],
+                                                 hi: [p.p[0] + p.s[0], p.p[1] + p.s[1], p.p[2] + p.s[2]]});
+  }
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), zAxis = new THREE.Vector3(0, 0, 1);
+  for (const g of groups.values()) {
+    const c = WORLD.materials[g.mat].rgba;
+    const mat = new THREE.MeshStandardMaterial({color: rgb(c), roughness: /glass/.test(g.mat) ? 0.25 : 0.82,
+      metalness: /glass|metal/.test(g.mat) ? 0.25 : 0.03, transparent: true, opacity: 1});
+    if (/beacon|lamp_light|traffic_/.test(g.mat)) { mat.emissive = rgb(c); mat.emissiveIntensity = 0.6; }
+    const mesh = new THREE.InstancedMesh(geo[g.kind], mat, g.items.length);
+    g.items.forEach((p, i) => {
+      const s = p.k === "box" ? [p.s[0], p.s[1], p.s[2]] : p.k === "cylinder" ? [p.s[0], p.s[0], p.s[1]] : [p.s[0], p.s[0], p.s[0]];
+      q.setFromAxisAngle(zAxis, p.yaw || 0);
+      m4.compose(new THREE.Vector3(p.p[0], p.p[1], p.p[2]), q, new THREE.Vector3(s[0], s[1], s[2]));
+      mesh.setMatrixAt(i, m4);
+    });
+    mesh.castShadow = g.cat !== "ground";
+    mesh.receiveShadow = true;
+    mesh.userData = {cat: g.cat, items: g.items};
+    layerGroups[g.cat].add(mesh);
+    pickables.push(mesh);
+  }
+}
+
+/* drone */
+function makeDrone() {
+  const g = new THREE.Group();
+  const dark = new THREE.MeshStandardMaterial({color: 0x22252a, roughness: 0.6, metalness: 0.3});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.07), dark); g.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.04), new THREE.MeshStandardMaterial({color: 0x3987e5}));
+  top.position.set(0.04, 0, 0.05); g.add(top);
+  const L = 0.23;
+  [[1, 1, 0x19c3ff], [1, -1, 0x19c3ff], [-1, 1, 0xff4d4d], [-1, -1, 0xff4d4d]].forEach(([sx, sy, col]) => {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(L * 1.45, 0.025, 0.02), dark);
+    arm.position.set(sx * L / 2, sy * L / 2, 0); arm.rotation.z = Math.atan2(sy, sx); g.add(arm);
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.008, 24).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({color: col, transparent: true, opacity: 0.55, emissive: col, emissiveIntensity: 0.25}));
+    rotor.position.set(sx * L, sy * L, 0.035); g.add(rotor);
+  });
+  g.traverse(o => { o.castShadow = true; });
+  g.scale.setScalar(1.6);          // a little larger than life so it stays visible in the city
+  return g;
+}
+const drone = makeDrone(); scene.add(drone);
+
+function makeLine(color, n, dashed) {
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geom.setDrawRange(0, 0);
+  const mat = dashed ? new THREE.LineDashedMaterial({color, dashSize: 0.5, gapSize: 0.3, linewidth: 2})
+                     : new THREE.LineBasicMaterial({color, linewidth: 2});
+  const line = new THREE.Line(geom, mat); line.frustumCulled = false; scene.add(line); return line;
+}
+function setLine(line, pts) {
+  const attr = line.geometry.attributes.position;
+  const n = Math.min(pts.length, attr.count);
+  for (let i = 0; i < n; i++) attr.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
+  attr.needsUpdate = true; line.geometry.setDrawRange(0, n);
+  if (line.computeLineDistances) line.computeLineDistances();
+}
+const trail = makeLine(new THREE.Color(css("--series-1")), CFG.trail_points);
+const refTrail = makeLine(new THREE.Color(css("--series-2")), CFG.trail_points);
+const routeLine = makeLine(new THREE.Color(css("--series-3")), 4000);
+const previewLine = makeLine(new THREE.Color(css("--series-4")), 4000, true);
+const trailPts = [], refPts = [];
+
+const target = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 14),
+  new THREE.MeshStandardMaterial({color: new THREE.Color(css("--critical")), transparent: true, opacity: 0.75,
+    emissive: new THREE.Color(css("--critical")), emissiveIntensity: 0.35}));
+scene.add(target);
+const targetPole = makeLine(new THREE.Color(css("--critical")), 2, true);
+const previewMarker = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12),
+  new THREE.MeshStandardMaterial({color: new THREE.Color(css("--series-4")), transparent: true, opacity: 0.8}));
+previewMarker.visible = false; scene.add(previewMarker);
+
+/* ------------------------------------------------------------------ camera modes & layers */
+let camMode = "orbit";
+function setCam(mode) {
+  camMode = mode;
+  ["camOrbit", "camFollow", "camTop"].forEach(id => $(id).classList.toggle("on", id === {orbit: "camOrbit", follow: "camFollow", top: "camTop"}[mode]));
+  const p = drone.position;
+  if (mode === "top") { controls.target.copy(p); camera.position.set(p.x, p.y - 0.01, p.z + 45); }
+  if (mode === "follow") { controls.target.copy(p); camera.position.set(p.x - 6, p.y - 6, p.z + 3.5); }
+  controls.update();
+}
+$("camOrbit").onclick = () => setCam("orbit");
+$("camFollow").onclick = () => setCam("follow");
+$("camTop").onclick = () => setCam("top");
+const bModes = ["solid", "see-through", "hidden"]; let bMode = 0;
+$("layBuildings").onclick = () => {
+  bMode = (bMode + 1) % 3;
+  layerGroups.buildings.visible = bMode !== 2;
+  layerGroups.buildings.children.forEach(m => { m.material.opacity = bMode === 1 ? 0.28 : 1; m.material.depthWrite = bMode !== 1; m.castShadow = bMode === 0; });
+  $("layBuildings").textContent = "Buildings: " + bModes[bMode];
+  $("layBuildings").classList.toggle("on", bMode !== 2);
+};
+function toggle(id, fn) { const b = $(id); b.onclick = () => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); fn(on); }; }
+toggle("layProps", on => layerGroups.props.visible = on);
+toggle("layCars", on => layerGroups.cars.visible = on);
+toggle("layTrail", on => { trail.visible = on; refTrail.visible = on; });
+toggle("layRoute", on => { routeLine.visible = on; previewLine.visible = on; });
+
+/* ------------------------------------------------------------------ hover info & target picking */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+function hit(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const vis = pickables.filter(o => { let v = true; o.traverseAncestors(a => { if (!a.visible) v = false; }); return v && o.visible; });
+  return ray.intersectObjects(vis, false)[0];
+}
+function buildingAt(p, pad = 0.15) {
+  return buildings.find(b => p.x >= b.lo[0] - pad && p.x <= b.hi[0] + pad && p.y >= b.lo[1] - pad && p.y <= b.hi[1] + pad && p.z <= b.hi[2] + pad);
+}
+function describe(h) {
+  if (!h) return null;
+  const p = h.point;
+  const b = buildingAt(p);
+  if (b) {
+    const roof = b.hi[2];
+    const onRoof = p.z >= roof - 0.3;
+    return {text: `Building · roof ${fmt(roof, 1)} m · ${fmt(b.hi[0] - b.lo[0], 1)} × ${fmt(b.hi[1] - b.lo[1], 1)} m` +
+      (onRoof ? " · click: target above roof" : ` · wall at z ${fmt(p.z, 1)} m`), roof: onRoof ? roof : null, b};
+  }
+  const u = h.object.userData;
+  let name = "Ground";
+  if (u.items && h.instanceId !== undefined) {
+    const n = u.items[h.instanceId].n.replace(/_\d+$/, "").replace(/_/g, " ");
+    name = n.charAt(0).toUpperCase() + n.slice(1) + ` (top ${fmt(u.items[h.instanceId].p[2] + (u.items[h.instanceId].k === "cylinder" ? u.items[h.instanceId].s[1] : u.items[h.instanceId].s[u.items[h.instanceId].k === "box" ? 2 : 0]), 1)} m)`;
+  }
+  return {text: `${name} · x ${fmt(p.x, 1)}  y ${fmt(p.y, 1)}  z ${fmt(p.z, 2)}`, roof: null};
+}
+let picking = false, downAt = null, lastHover = 0;
+$("pickBtn").onclick = () => setPicking(!picking);
+function setPicking(on) { picking = on; $("pickBtn").classList.toggle("on", on); $("pickhint").style.display = on ? "block" : "none"; renderer.domElement.style.cursor = on ? "crosshair" : ""; }
+window.addEventListener("keydown", e => { if (e.key === "Escape") setPicking(false); });
+renderer.domElement.addEventListener("pointerdown", e => downAt = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!picking || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  const h = hit(e); if (!h) return;
+  const info = describe(h);
+  let x = h.point.x, y = h.point.y, z;
+  if (info && info.roof !== null) z = info.roof + CFG.roof_clearance;
+  else if (info && info.b) {         // clicked a wall: target just outside it at that height
+    const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3();
+    x += n.x * CFG.clearance * 1.5; y += n.y * CFG.clearance * 1.5; z = h.point.z;
+  } else z = Number($("pickAlt").value) || CFG.pick_altitude;
+  $("tx").value = x.toFixed(1); $("ty").value = y.toFixed(1); $("tz").value = Math.max(0.3, z).toFixed(1);
+  setPicking(false);
+  checkRoute();
+});
+renderer.domElement.addEventListener("pointermove", e => {
+  const now = performance.now(); if (now - lastHover < 60) return; lastHover = now;
+  const info = describe(hit(e)); const box = $("hover3d");
+  if (!info) { box.style.display = "none"; return; }
+  const r = view.getBoundingClientRect();
+  box.textContent = info.text; box.style.display = "block";
+  box.style.left = Math.min(e.clientX - r.left + 14, r.width - box.offsetWidth - 8) + "px";
+  box.style.top = (e.clientY - r.top + 14) + "px";
+});
+renderer.domElement.addEventListener("pointerleave", () => $("hover3d").style.display = "none");
+
+/* ------------------------------------------------------------------ commands & route check */
+const tgt = () => [Number($("tx").value), Number($("ty").value), Number($("tz").value)];
+async function checkRoute() {
+  const res = $("routeResult"); res.style.display = "block";
+  $("verdict").className = "verdict"; $("verdict").textContent = "Planning ..."; $("routeGrid").innerHTML = "";
+  try {
+    const r = await postJSON("/api/check_route", {target: tgt()});
+    if (!r.ok) { $("verdict").className = "verdict err"; $("verdict").textContent = r.verdict; return; }
+    const icon = {direct: "✓", between: "✓", around: "✓", over: "▲"}[r.kind] || "•";
+    $("verdict").className = "verdict " + r.kind;
+    $("verdict").innerHTML = `<span class="ic">${icon}</span>${r.verdict}`;
+    const rows = [["Route", {direct: "straight", between: "between buildings", around: "curves around obstacles", over: "over the buildings"}[r.kind]],
+      ["Goal used", vec(r.goal, 1)], ["Length", fmt(r.length, 1) + " m"], ["Est. flight time", "≈ " + fmt(r.eta, 0) + " s"],
+      ["Highest point", fmt(r.max_alt, 1) + " m"], ["Min. clearance", r.min_clearance === null ? "-" : fmt(r.min_clearance, 2) + " m"],
+      ["Narrowest gap", r.narrowest_gap === null ? "no building on both sides" : fmt(r.narrowest_gap, 1) + " m"],
+      ["Planner", r.note || "direct"]];
+    $("routeGrid").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v" title="${v}">${v}</span>`).join("");
+    setLine(previewLine, r.points); previewMarker.position.set(...r.goal); previewMarker.visible = true;
+  } catch (e) { $("verdict").className = "verdict err"; $("verdict").textContent = "Route check failed: " + e.message; }
+}
+$("checkBtn").onclick = checkRoute;
+$("flyBtn").onclick = async () => {
+  const [x, y, z] = tgt();
+  await postJSON("/api/command", {text: `${x} ${y} ${z} ${Number($("th").value) || 0}`});
+  previewMarker.visible = false; setLine(previewLine, []);
+};
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = async () => {
+  await postJSON("/api/command", {text: "MODE " + b.dataset.mode});
+  previewMarker.visible = false; setLine(previewLine, []);
+});
+$("clearLog").onclick = async () => { await postJSON("/api/clear_log", {}); hist.length = 0; };
+
+/* ------------------------------------------------------------------ telemetry */
+const hist = [];   // {t, pos, ref, err, speed, thrust, kf, noise}
+let T = null, routeId = -1, failures = 0;
+async function poll() {
+  try {
+    const tm = await getJSON("/api/telemetry");
+    failures = 0; $("offline").style.display = "none";
+    $("connDot").className = "dot good"; $("connTxt").textContent = "live";
+    if (!tm.pos) return;
+    if (T && tm.time < T.time - 0.5) { hist.length = 0; trailPts.length = 0; refPts.length = 0; }  // backend restarted
+    T = tm;
+    onTelemetry(tm);
+    if (tm.route_id !== routeId) {
+      routeId = tm.route_id;
+      const r = await getJSON("/api/route");
+      setLine(routeLine, r.points || []);
+    }
+  } catch (e) {
+    failures++;
+    $("connDot").className = "dot bad"; $("connTxt").textContent = "offline";
+    if (failures > 10) $("offline").style.display = "flex";
+  }
+}
+function pushTrail(arr, p, line) {
+  const last = arr[arr.length - 1];
+  if (!last || Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]) > 0.03) {
+    arr.push(p.slice()); if (arr.length > CFG.trail_points) arr.shift(); setLine(line, arr);
+  }
+}
+function onTelemetry(tm) {
+  drone.position.set(...tm.pos);
+  drone.quaternion.set(tm.quat[1], tm.quat[2], tm.quat[3], tm.quat[0]);
+  pushTrail(trailPts, tm.pos, trail); pushTrail(refPts, tm.ref, refTrail);
+  target.position.set(...tm.marker);
+  setLine(targetPole, [tm.marker, [tm.marker[0], tm.marker[1], 0]]);
+  const last = hist[hist.length - 1];
+  if (!last || tm.time > last.t) {
+    hist.push({t: tm.time, pos: tm.pos, ref: tm.ref, err: tm.error * 100, speed: tm.speed, thrust: tm.thrust,
+               kf: tm.est_error * 100, noise: tm.noise * 100});
+    while (hist.length && hist[0].t < tm.time - CFG.history_s) hist.shift();
+  }
+  $("phase").textContent = tm.phase;
+  $("backendStatus").textContent = tm.status || "";
+  const e = tm.euler_deg;
+  const rows = [
+    ["Sim time", fmt(tm.time, 1) + " s"], ["Mode", tm.mode],
+    ["Position", vec(tm.pos) + " m"], ["Reference", vec(tm.ref) + " m"],
+    ["Tracking error", fmt(tm.error * 100, 1) + " cm"], ["Velocity", vec(tm.vel) + " m/s"],
+    ["Speed", fmt(tm.speed, 2) + " m/s"], ["Roll / pitch / yaw", `${fmt(e[0], 1)} / ${fmt(e[1], 1)} / ${fmt(e[2], 1)} °`],
+    ["Body rates", vec(tm.rates) + " rad/s"], ["Thrust", fmt(tm.thrust, 2) + " N"],
+    ["Torques", vec(tm.torques, 4) + " N·m"], ["KF error", fmt(tm.est_error * 100, 1) + " cm"],
+    ["Sensor noise", fmt(tm.noise * 100, 1) + " cm"], ["Lyapunov V", fmt(tm.lyapunov, 4)],
+    ["LiDAR", (tm.avoiding ? "AVOIDING · " : "") + tm.lidar], ["Goal", vec(tm.goal, 1)],
+    ["Route", tm.waypoints_left ? tm.waypoints_left + " curve points left" : "-"],
+  ];
+  $("values").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join("");
+  $("hud").innerHTML = `<span class="k">t</span> ${fmt(tm.time, 1)} s &nbsp; <span class="k">err</span> ${fmt(tm.error * 100, 1)} cm<br>` +
+    `<span class="k">alt</span> ${fmt(tm.pos[2], 2)} m &nbsp; <span class="k">v</span> ${fmt(tm.speed, 2)} m/s<br>` +
+    `<span class="k">LiDAR</span> ${tm.lidar}`;
+  $("rowCount").textContent = tm.rows + " rows logged";
+}
+
+/* ------------------------------------------------------------------ charts (canvas, hover crosshair) */
+const S1 = css("--series-1"), S2 = css("--series-2");
+const chartDefs = [
+  {id: "cx", title: "x position (m)", series: [["actual", S1, h => h.pos[0]], ["reference", S2, h => h.ref[0]]]},
+  {id: "cy", title: "y position (m)", series: [["actual", S1, h => h.pos[1]], ["reference", S2, h => h.ref[1]]]},
+  {id: "cz", title: "z altitude (m)", series: [["actual", S1, h => h.pos[2]], ["reference", S2, h => h.ref[2]]]},
+  {id: "ce", title: "tracking error (cm)", series: [["error", S1, h => h.err]]},
+  {id: "cs", title: "speed (m/s)", series: [["speed", S1, h => h.speed]]},
+  {id: "ct", title: "thrust (N)", series: [["thrust", S1, h => h.thrust]]},
+];
+const charts = chartDefs.map(def => {
+  const el = document.createElement("div"); el.className = "chart";
+  const legend = def.series.length > 1 ? `<span class="lg">${def.series.map(s => `<span><i style="background:${s[1]}"></i>${s[0]}</span>`).join("")}</span>` : "";
+  el.innerHTML = `<div class="t"><span>${def.title}</span>${legend}</div><canvas></canvas>`;
+  $("charts").appendChild(el);
+  const c = {def, el, cv: el.querySelector("canvas"), hoverX: null};
+  c.cv.addEventListener("mousemove", ev => { const r = c.cv.getBoundingClientRect(); c.hoverX = ev.clientX - r.left; draw(c); });
+  c.cv.addEventListener("mouseleave", () => { c.hoverX = null; $("tip").style.display = "none"; draw(c); });
+  return c;
+});
+function niceRange(lo, hi) {
+  if (!isFinite(lo)) return [0, 1];
+  if (hi - lo < 1e-6) { lo -= 0.5; hi += 0.5; }
+  const pad = (hi - lo) * 0.08; return [lo - pad, hi + pad];
+}
+function draw(c) {
+  const cv = c.cv, dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const L = 34, R = 4, Tp = 4, B = 14, pw = W - L - R, ph = H - Tp - B;
+  if (hist.length < 2) { g.fillStyle = css("--text-muted"); g.font = "11px system-ui"; g.fillText("waiting for data", L, H / 2); return; }
+  const t1 = hist[hist.length - 1].t, t0 = Math.max(hist[0].t, t1 - CFG.history_s);
+  let lo = Infinity, hi = -Infinity;
+  for (const h of hist) for (const s of c.def.series) { const v = s[2](h); if (v < lo) lo = v; if (v > hi) hi = v; }
+  [lo, hi] = niceRange(lo, hi);
+  const X = t => L + (t - t0) / Math.max(t1 - t0, 1e-6) * pw, Y = v => Tp + (hi - v) / (hi - lo) * ph;
+  g.strokeStyle = "rgba(255,255,255,0.07)"; g.lineWidth = 1; g.fillStyle = css("--text-muted"); g.font = "10px system-ui";
+  for (let k = 0; k <= 2; k++) {
+    const v = lo + (hi - lo) * k / 2, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke();
+    g.fillText(Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(Math.abs(hi - lo) < 1 ? 2 : 1), 2, y + 3);
+  }
+  g.fillText(t0.toFixed(0) + " s", L, H - 2); const te = t1.toFixed(0) + " s"; g.fillText(te, W - R - g.measureText(te).width, H - 2);
+  for (const s of [...c.def.series].reverse()) {          // reference under actual
+    g.strokeStyle = s[1]; g.lineWidth = 2; g.lineJoin = "round"; g.beginPath();
+    hist.forEach((h, i) => { const x = X(h.t), y = Y(s[2](h)); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  }
+  if (c.hoverX !== null && c.hoverX >= L) {
+    const tt = t0 + (c.hoverX - L) / pw * (t1 - t0);
+    let best = hist[0]; for (const h of hist) if (Math.abs(h.t - tt) < Math.abs(best.t - tt)) best = h;
+    const x = X(best.t);
+    g.strokeStyle = "rgba(255,255,255,0.35)"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, Tp); g.lineTo(x, Tp + ph); g.stroke();
+    for (const s of c.def.series) { g.fillStyle = s[1]; g.beginPath(); g.arc(x, Y(s[2](best)), 4, 0, 2 * Math.PI); g.fill();
+      g.strokeStyle = css("--surface-2"); g.lineWidth = 2; g.stroke(); }
+    const tip = $("tip"), r = cv.getBoundingClientRect();
+    tip.innerHTML = `t = ${best.t.toFixed(1)} s<br>` + c.def.series.map(s => `<span style="color:${s[1]}">■</span> ${s[0]}: ${s[2](best).toFixed(3)}`).join("<br>");
+    tip.style.display = "block";
+    tip.style.left = Math.min(r.left + x + 12, window.innerWidth - tip.offsetWidth - 8) + "px";
+    tip.style.top = (r.top + window.scrollY - 8) + "px";
+  }
+}
+async function refreshRows() {
+  // small preview of the newest exported rows (per second)
+  try {
+    if (!T) return;
+    const cols = ["time", "x", "y", "z", "err cm", "speed", "thrust"];
+    const last = hist.filter((h, i) => i === hist.length - 1 || Math.floor(h.t) !== Math.floor((hist[i + 1] || {t: -1}).t)).slice(-6).reverse();
+    $("lastRows").innerHTML = `<tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr>` + last.map(h =>
+      `<tr><td>${h.t.toFixed(1)}</td><td>${fmt(h.pos[0])}</td><td>${fmt(h.pos[1])}</td><td>${fmt(h.pos[2])}</td><td>${fmt(h.err, 1)}</td><td>${fmt(h.speed)}</td><td>${fmt(h.thrust)}</td></tr>`).join("");
+  } catch (e) { /* ignore */ }
+}
+
+/* ------------------------------------------------------------------ main loop */
+const lastDrone = new THREE.Vector3();
+function animate() {
+  requestAnimationFrame(animate);
+  if (camMode !== "orbit") {
+    const d = new THREE.Vector3().subVectors(drone.position, lastDrone);
+    camera.position.add(d); controls.target.add(d);
+  }
+  lastDrone.copy(drone.position);
+  drone.children.forEach((o, i) => { if (o.geometry && o.geometry.type === "CylinderGeometry") o.rotation.z += 0.9 + i * 0.01; });
+  controls.update();
+  renderer.render(scene, camera);
+}
+resize();
+loadWorld().then(() => { resize(); }).catch(e => { $("offline").style.display = "flex"; });
+setInterval(poll, CFG.poll_ms);
+setInterval(() => { charts.forEach(draw); refreshRows(); }, CFG.chart_period_ms);
+animate();
+</script>
+</body>
+</html>

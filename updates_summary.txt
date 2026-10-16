@@ -87,3 +87,116 @@ and gym-pybullet-drones physics engines.
   * test_pybullet_sim.py (Aviary initialization, mixer math, filter integration)
   * test_sitl_bridge.py (MAVLink telemetry parsing and attitude commands)
 ================================================================================
+
+
+================================================================================
+          UPDATE - October 16, 2026 : FULL PAPER CONTROLLER IN EVERY SIMULATOR
+================================================================================
+1. Full De Monte & Lohmann (2013) backstepping controller
+   (quadrotor_controller/paper_controller.py): eqs. (24), (29), (31), (32)-(46),
+   (47)-(54) with the paper's gains A_x=-1, A_v=-3, A_t=-8, A_r=-12, a_phi=-2,
+   a_wz=-12; dynamic thrust extension; analytic derivatives; drag term f(v).
+2. C^4 references (trajectory.py): paper Fig. 4 helix (x 1 m, y 2 m lagging,
+   z 0.5-1.5 m, heading +/-1 rad), figure-8, rest-to-rest mission with speed
+   ramps, 5th-order set-point reference model (paper Fig. 3).
+3. Shared guidance (guidance.py): target.txt commands, smooth mode switching,
+   carrot-based LiDAR avoidance for set points (no collisions in tests).
+4. MuJoCo: real dynamics - thrust/torques through actuators (no more qpos
+   overwrite); LiDAR via mj_ray (ignores the target marker); corridor blocks
+   and lamps moved out of the flight area.
+5. PyBullet: fixed the crash (gyro rates converted world->body, controller
+   with Crazyflie inertia, 1 kHz physics / 500 Hz control, PyBullet default
+   damping switched off); same city layout as MuJoCo.
+6. Gazebo / web bridge: PythonFlightSim (rigid body 500 Hz + controller + KF);
+   fixed target parsing, helix, WebSocket port; dashboard 'Mission' button.
+7. ArduPilot: NED/FRD <-> ENU/FLU conversion, rates+thrust SET_ATTITUDE_TARGET,
+   mock_mavlink_vehicle.py for offline tests.
+8. Kalman filter now uses the model acceleration as input (no lag); torque
+   command chatter reduced ~80x vs raw noise.
+9. track_error.py reproduces Fig. 3 / Fig. 4, compares full vs simplified law,
+   writes results_table.md and results/*.png, *.csv.
+10. Tests: 44 passing (18 new). README rewritten to match the code.
+Backup of all replaced files: _backup_before_paper_controller_2026-10-16/
+
+
+================================================================================
+          UPDATE - October 16, 2026 (2) : NO HARD-CODED VALUES
+================================================================================
+- New config.yaml holds every tunable value (vehicle, gains, noise, filter,
+  trajectories, mission timing, guidance, avoidance, simulator rates, cameras,
+  HUD, ports, WSL/Pixi/VcXsrv paths, MAVLink, experiments, logging).
+- quadrotor_controller/config.py: strict cfg('section.key') (missing key -> clear
+  error), --config / --set overrides, DRONES_CONFIG, built-in YAML-subset parser.
+- PyBullet city is now built from models/quadrotor.xml (one world for both sims).
+- Smoothstep coefficients and reference-model peak factor computed from formulas.
+- .bat/.sh launchers find their own folder (no D:\Drones, /mnt/d/Drones, D:\Anaconda);
+  DRONES_PYTHON selects the Python; run_gazebo.sh reads config via gazebo_env.py.
+- Dashboard gets its WebSocket address from the bridge (config bridge.*).
+- gym-pybullet-drones used directly from gym_pybullet_drones_repo (no pip needed;
+  if installing: pip install -e gym_pybullet_drones_repo --no-deps).
+- tests/test_config.py (5 tests) incl. a guard against new hard-coded numbers.
+- 49 tests passing; results identical to before the refactor.
+
+
+================================================================================
+     UPDATE - October 16, 2026 (3) : REALISTIC CITY, VIEWERS, GAZEBO, ARDUPILOT
+================================================================================
+- One procedurally generated city for every simulator (generate_world.py,
+  quadrotor_controller/world_builder.py, config world.* incl. world.props):
+  plaza + helipad, ring road / avenues with markings and zebra crossings,
+  sidewalks, trees, street lamps, traffic lights, parked cars, 2-15 storey
+  buildings with windows, roof units and antenna beacons (1307 primitives).
+  -> models/city.xml (MuJoCo, also used by PyBullet), models/quadrotor.world (Gazebo).
+- PyBullet viewer: side panels removed (full-screen 3D), shadows, follow /
+  overview / top cameras (keys 1-3), trail (4), arrow keys rotate, = / - zoom,
+  mouse still works; HUD text above the drone; fast world build.
+- MuJoCo viewer: side panels hidden, optional tracking camera, flight trail.
+- Gazebo: new model plugin gazebo_plugin/udp_pose_plugin.cc moves the drone and
+  the target marker from UDP every physics step (smooth, no gz-model calls);
+  build_gazebo_plugin.sh; automatic fallback to gz model. Verified in Gazebo 11.
+- ArduPilot: complete pre-flight in SITLBridge (stream rates, MOT_THST_HOVER
+  read, GUID_OPTIONS set + verified, EKF wait, GUIDED, arm with ACK/heartbeat,
+  STATUSTEXT, GCS heartbeat, failsafe detection, LAND + disarm);
+  run_ardupilot_sitl.py --launch none|dronekit|command; mock_mavlink_vehicle.py
+  now behaves like ArduCopter (params, modes, pre-arm checks, LAND, auto-disarm).
+- Takeoff overshoot fixed (ground-clearance push only while descending).
+- pytest.ini; 50 tests passing (new: test_mavlink_preflight.py).
+
+
+================================================================================
+     UPDATE - October 17, 2026 : PATH PLANNER, GAZEBO LIDAR/NOISE, PYBULLET HUD
+================================================================================
+- New global path planner for set points in every simulator
+  (quadrotor_controller/path_planner.py + world_map.py, config planner.*):
+  straight if free; target inside a building -> nearest reachable free point;
+  else climb to cruise height + A* around the blocks; else over the top.
+- Gazebo / web bridge flight core (PythonFlightSim): LiDAR ray cast on the city
+  map, reactive avoidance and the planner (before: no obstacles -> flew through
+  the clock tower and into blocks). Console shows noise, KF error, LiDAR, route.
+  Target marker shows the (possibly moved) goal.
+- launch_gazebo_wsl.py fixed: Gazebo got no environment ('&' vs '&&'), wsl --exec,
+  launch script file, WSLg auto-detect, plugin auto-build (installs cmake/g++).
+- PyBullet: normal 1280x720 window; values pinned to the top-left corner (4 lines
+  like MuJoCo's HUD) instead of floating in the middle of the screen.
+- 54 tests passing (new tests/test_path_planner.py).
+- Planned routes are now smooth curves (corner rounding checked against the city,
+  planner.corner_radius / radius_scales / curve_clearance / sample_step): the
+  drone climbs while it turns instead of "straight up, then across"
+  (max heading change 4 deg per 0.5 s on the 12 10 9 flight). Same in all simulators.
+
+
+================================================================================
+          UPDATE - October 17, 2026 (2) : 3D WEB DASHBOARD WITH GAZEBO BACKEND
+================================================================================
+- START_WEB_DASHBOARD.bat -> launch_gazebo_wsl.py --web: Gazebo 11 + run_web_dashboard.py
+  (flight core: paper controller, noise, KF, LiDAR, avoidance, path planner) in WSL;
+  the browser opens http://localhost:8090 on Windows.
+- drone_dashboard.html: 3D city (same world), drone, flown path / reference /
+  planned route / preview, orbit-follow-top cameras, buildings solid / see-through /
+  hidden, hover info (building heights), click-to-pick targets (ground / roof).
+- Live trajectory values + 6 charts (x, y, z vs reference, error, speed, thrust).
+- "Check route": can the drone fly between the buildings? (narrowest gap, clearance,
+  length, ETA, target moved out of a building, over-the-top fallback) before flying.
+- Export: one row per simulated second, 32 columns, CSV / JSON (+ copy in results/).
+- three.js bundled (web_vendor/) - works offline; backend needs only stdlib + numpy.
+- 56 tests passing (new tests/test_web_dashboard.py).

@@ -68,5 +68,26 @@ class SITLBridgeTests(unittest.TestCase):
         self.assertEqual(bridge.last_attitude_target, target)
 
 
+class FrameConversionTests(unittest.TestCase):
+    def test_ned_frd_to_enu_flu(self):
+        import math
+        from quadrotor_controller import heading_from_quaternion, ned_frd_to_enu_flu, quat_to_rot
+        s = ned_frd_to_enu_flu((1, 2, -3), (0.1, 0.2, -0.3), 0.0, 0.0, math.radians(30), (0.1, 0.2, 0.3))
+        self.assertEqual(s.position, (2.0, 1.0, 3.0))          # east, north, up
+        self.assertEqual(s.velocity, (0.2, 0.1, 0.3))
+        self.assertAlmostEqual(math.degrees(heading_from_quaternion(s.quaternion)), 60.0, places=6)
+        self.assertEqual(s.angular_rate, (0.1, -0.2, -0.3))
+        rolled = ned_frd_to_enu_flu((0, 0, 0), (0, 0, 0), math.radians(10), 0.0, 0.0, (0, 0, 0))
+        self.assertGreater(quat_to_rot(rolled.quaternion)[2, 1], 0.0)   # right roll lifts the left side
+
+    def test_send_rates_thrust_mock(self):
+        bridge = SITLBridge()
+        bridge.connect()
+        bridge.send_rates_thrust((0.1, -0.2, 0.3), thrust_newton=14.715, hover_thrust_newton=14.715)
+        t = bridge.last_attitude_target
+        self.assertAlmostEqual(t["thrust"], 0.5)
+        self.assertEqual((t["roll_rate"], t["pitch_rate"], t["yaw_rate"]), (0.1, 0.2, -0.3))
+
+
 if __name__ == "__main__":
     unittest.main()

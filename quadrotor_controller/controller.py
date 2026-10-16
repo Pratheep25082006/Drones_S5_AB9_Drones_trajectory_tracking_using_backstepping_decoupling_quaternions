@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import atan2, cos, pi, sin, sqrt
-from typing import Tuple
+from typing import Optional, Tuple
+
+from .config import cfg, pick
 
 
 @dataclass
@@ -22,14 +24,19 @@ class ControllerReference:
 
 
 class BacksteppingController:
-    def __init__(self, mass: float = 1.5, gravity: float = 9.81) -> None:
-        self.mass = mass
-        self.gravity = gravity
-        self.k_position = 2.0
-        self.k_velocity = 1.5
-        self.k_tilt = 3.5
-        self.k_yaw = 2.5
-        self.k_rate = 0.8
+    """Earlier simplified 2-step law (baseline).  Gains: config.yaml -> baseline_controller."""
+
+    def __init__(self, mass: Optional[float] = None, gravity: Optional[float] = None) -> None:
+        self.mass = pick(mass, "vehicle.mass")
+        self.gravity = pick(gravity, "vehicle.gravity")
+        self.k_position = cfg("baseline_controller.k_position")
+        self.k_velocity = cfg("baseline_controller.k_velocity")
+        self.k_tilt = cfg("baseline_controller.k_tilt")
+        self.k_yaw = cfg("baseline_controller.k_yaw")
+        self.k_rate = cfg("baseline_controller.k_rate")
+        self.max_horizontal_acceleration = cfg("baseline_controller.max_horizontal_acceleration")
+        self.max_thrust_ratio = cfg("baseline_controller.max_thrust_ratio")
+        self.min_thrust = cfg("baseline_controller.min_thrust")
 
     def compute_command(
         self, state: ControllerState, reference: ControllerReference, dt: float
@@ -44,7 +51,7 @@ class BacksteppingController:
         )
 
         # Cap horizontal acceleration to prevent extreme tilt flips (Max Tilt Safety Capping)
-        max_horiz_acc = 5.0  # m/s^2
+        max_horiz_acc = self.max_horizontal_acceleration
         ax, ay, az = desired_acc_raw
         horiz_norm = sqrt(ax * ax + ay * ay)
         if horiz_norm > max_horiz_acc:
@@ -58,11 +65,11 @@ class BacksteppingController:
             self._scale(desired_acceleration, self.mass),
         )
 
-        # Thrust physical actuator saturation (Max 2.5x hover thrust)
-        max_thrust = 2.5 * self.mass * self.gravity
+        # Thrust physical actuator saturation (multiple of hover thrust)
+        max_thrust = self.max_thrust_ratio * self.mass * self.gravity
         thrust = max(0.0, min(max_thrust, self._norm(thrust_vector)))
 
-        desired_direction = self._normalize(thrust_vector) if thrust > 1e-6 else (0.0, 0.0, 1.0)
+        desired_direction = self._normalize(thrust_vector) if thrust > self.min_thrust else (0.0, 0.0, 1.0)
         actual_direction = self._thrust_direction(state.quaternion)
 
         attitude_error = self._cross(actual_direction, desired_direction)
@@ -188,7 +195,7 @@ def decompose_attitude(q: Tuple[float, float, float, float]) -> Tuple[Tuple[floa
     q = normalize_quaternion(q)
     w, x, y, z = q
     qp = sqrt(z * z + w * w)
-    if qp <= 1e-12:
+    if qp <= cfg("numerics.degenerate_tolerance"):
         return (1.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)
 
     qx = (w * x - z * y) / qp

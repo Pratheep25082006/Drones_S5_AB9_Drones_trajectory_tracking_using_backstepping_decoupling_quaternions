@@ -6,3 +6,11 @@ __pycache__/
 *.log
 gym_pybullet_drones_repo/
 
+.pytest_cache/
+_backup_before_paper_controller_*/
+_preview/
+Claude outputs/
+.gazebo_launch.sh
+gazebo_plugin/build/
+results/trajectory_*.csv
+results/trajectory_*.json

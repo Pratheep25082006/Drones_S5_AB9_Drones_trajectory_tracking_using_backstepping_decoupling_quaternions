@@ -50,7 +50,7 @@ def test_force_torque_mixer():
     g = 9.81
     hover_thrust = mass * g
 
-    rpms = mixer.compute_rpms(thrust=hover_thrust, torques=(0.0, 0.0, 0.0))
+    rpms = mixer.compute_rpms(thrust=hover_thrust, torques=(0.0, 0.0, 0.0), max_rpm=np.inf)
     assert len(rpms) == 4
     assert np.allclose(rpms, rpms[0]), "All 4 rotor RPMs should be equal in hover"
     assert rpms[0] > 10000.0, f"Expected hover RPM ~14000, got {rpms[0]}"
@@ -107,3 +107,33 @@ def test_pybullet_step_with_noise_and_kalman_filter():
     avg_noise = float(np.mean(noise_errs[30:]))
     avg_kf = float(np.mean(kf_errs[30:]))
     assert avg_kf < avg_noise, f"Kalman filter should reduce error: KF={avg_kf:.4f}, Noise={avg_noise:.4f}"
+
+
+def test_pybullet_paper_controller_hover():
+    """Full paper controller + CF2X mixer hovers the Crazyflie at 1 m (body-frame gyro rates)."""
+    import pybullet as p
+    from quadrotor_controller import PaperBacksteppingController, SetpointReferenceModel, quat_to_rot
+
+    env = CtrlAviary(drone_model=DroneModel.CF2X, num_drones=1, initial_xyzs=np.array([[0.0, 0.0, 0.08]]),
+                     physics=Physics.PYB, pyb_freq=1000, ctrl_freq=500, gui=False)
+    obs, _ = env.reset()
+    d = env.DRONE_IDS[0]
+    for link in range(-1, p.getNumJoints(d, physicsClientId=env.CLIENT)):
+        p.changeDynamics(d, link, linearDamping=0.0, angularDamping=0.0, physicsClientId=env.CLIENT)
+    dt = 1.0 / env.CTRL_FREQ
+    ctl = PaperBacksteppingController(mass=env.M, inertia=(env.J[0, 0], env.J[1, 1], env.J[2, 2]), gravity=env.G,
+                                      thrust_limits=(0.15 * env.M * env.G, 0.9 * 4 * env.KF * env.MAX_RPM ** 2))
+    mixer = ForceTorqueMixer(arm_length=float(env.L), kf=float(env.KF), km=float(env.KM))
+    rm = SetpointReferenceModel((0.0, 0.0, 0.08))
+    rm.set_target((0.0, 0.0, 1.0))
+    for _ in range(int(6.0 / dt)):
+        ref = rm.step(dt)
+        qx, qy, qz, qw = obs[0, 3:7]
+        q = (qw, qx, qy, qz)
+        w_body = quat_to_rot(q).T @ obs[0, 13:16]
+        s = ControllerState(tuple(obs[0, 0:3]), tuple(obs[0, 10:13]), q, tuple(w_body))
+        thrust, tau = ctl.compute(s, ref, dt)
+        obs, *_ = env.step(mixer.compute_rpms(thrust, tau, max_rpm=float(env.MAX_RPM)).reshape(1, 4))
+    pos = obs[0, 0:3]
+    env.close()
+    assert np.linalg.norm(pos - np.array([0.0, 0.0, 1.0])) < 0.02

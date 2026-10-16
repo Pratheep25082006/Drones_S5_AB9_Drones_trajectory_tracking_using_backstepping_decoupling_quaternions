@@ -1,31 +1,35 @@
 """
-Omnidirectional LiDAR Sensor & Reactive Obstacle Avoidance for Urban City Environments.
-Implements:
-  1. Omnidirectional LiDAR data structure (8 horizontal rays + 2 vertical rays).
-  2. Artificial Potential Field (APF) + Tangential Circulation for obstacle circumnavigation.
-  3. Seamless path replanning to steer drones around skyscrapers and building blocks.
+Omnidirectional LiDAR scan + reactive obstacle avoidance.
+
+  1. LiDAR data structure: N horizontal rays (evenly spaced, heading frame) + up/down rays.
+  2. Artificial potential field (repulsion) + tangential circulation (wall following).
+  3. Side memory (hysteresis) and optional "ignore obstacles behind the motion".
+
+All parameters come from config.yaml -> avoidance (constructor arguments override them).
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
+
+from .config import cfg, section
+from .units import DEG_PER_TURN
 
 
 @dataclass
 class LidarScan:
-    """
-    3D LiDAR sensor readings from drone center.
-    Angles: 0 (Forward), 45, 90 (Left), 135, 180 (Back), 225, 270 (Right), 315.
-    Plus up and down range.
-    Distances in meters. -1 or large value indicates no hit / out of range.
-    """
-    ranges: List[float]       # 8 horizontal ray distances in order [0, 45, 90, 135, 180, 225, 270, 315]
-    dist_up: float            # upward clearance
-    dist_down: float          # downward clearance
-    max_range: float = 8.0
+    """Ranges of the horizontal rays (index i at angle i * 360/N deg from the heading,
+    counter-clockwise: forward, forward-left, left, ...) and the up/down clearances.
+    Values <= 0 mean 'no hit'."""
+
+    ranges: List[float]
+    dist_up: float
+    dist_down: float
+    max_range: float = field(default_factory=lambda: cfg("avoidance.lidar_range"))
 
     @property
     def min_horizontal_dist(self) -> float:
@@ -38,127 +42,107 @@ class LidarScan:
         return int(np.argmin(valid_ranges))
 
 
+def sector_name(index: int, beams: int) -> str:
+    """Readable name of a horizontal ray (8 beams: FWD, FWD-L, LEFT, ...)."""
+    names8 = ["FWD", "FWD-L", "LEFT", "REAR-L", "REAR", "REAR-R", "RIGHT", "FWD-R"]
+    if beams == len(names8):
+        return names8[index]
+    return f"{round(index * DEG_PER_TURN / beams)}deg"
+
+
 class ReactiveObstacleAvoider:
-    """
-    Reactive Obstacle Avoidance Engine.
-    Combines repulsive potential fields with tangential circulation vectors
-    to smoothly steer the drone around buildings without getting trapped in local minima.
-    """
+    """Repulsive potential field + tangential circulation around obstacles."""
 
-    def __init__(
-        self,
-        safety_distance: float = 1.0,     # Critical inner safety margin (meters)
-        detection_distance: float = 2.2,  # Outer detection distance where avoidance starts (meters)
-        max_repulsive_speed: float = 2.2, # Max avoidance speed in m/s
-    ) -> None:
-        self.safety_distance = float(safety_distance)
-        self.detection_distance = float(detection_distance)
-        self.max_repulsive_speed = float(max_repulsive_speed)
+    def __init__(self, safety_distance: Optional[float] = None, detection_distance: Optional[float] = None,
+                 max_repulsive_speed: Optional[float] = None, ignore_behind: Optional[bool] = None,
+                 **overrides: Any) -> None:
+        given = {k: v for k, v in dict(safety_distance=safety_distance, detection_distance=detection_distance,
+                                        max_repulsive_speed=max_repulsive_speed,
+                                        ignore_behind=ignore_behind).items() if v is not None}
+        given.update(overrides)
+        p: Dict[str, Any] = section("avoidance", given)
+        self.params = p
+        self.safety_distance = float(p["safety_distance"])
+        self.detection_distance = float(p["detection_distance"])
+        self.max_repulsive_speed = float(p["max_repulsive_speed"])
+        self.ignore_behind = bool(p["ignore_behind"])
+        self.clear_reset_steps = int(p["clear_reset_steps"])
+        # Side memory: once an obstacle is being passed on one side, keep that side until the
+        # path has been clear for clear_reset_steps (removes the APF local minimum / dithering).
+        self._circ_sign: Optional[float] = None
+        self._clear_count = 0
+        self.beams = int(p["lidar_beams"])
+        step = 2.0 * math.pi / self.beams
+        self.ray_dirs = [(math.cos(i * step), math.sin(i * step), 0.0) for i in range(self.beams)]
 
-        # 8 Horizontal Ray Unit Vectors (in drone body / heading frame)
-        self.ray_angles = [i * (math.pi / 4.0) for i in range(8)]
-        self.ray_dirs = [
-            (math.cos(ang), math.sin(ang), 0.0) for ang in self.ray_angles
-        ]
+    def compute_avoidance_velocity(self, lidar: LidarScan, current_vel: Tuple[float, float, float],
+                                   desired_vel: Tuple[float, float, float], heading: float = 0.0,
+                                   ground_check: bool = True) -> Tuple[Tuple[float, float, float], bool, str]:
+        """Collision-free velocity from the nominal one.  Returns (velocity, avoiding, status).
+        ground_check: push up when descending close to something below (off while landing)."""
+        p = self.params
+        rep_x = rep_y = rep_z = 0.0
+        avoiding = False
+        cos_h, sin_h = math.cos(heading), math.sin(heading)
+        speed_xy = math.hypot(desired_vel[0], desired_vel[1])
+        ranges = list(lidar.ranges)
+        clamp = self.safety_distance * p["safety_clamp_factor"]
 
-    def compute_avoidance_velocity(
-        self,
-        lidar: LidarScan,
-        current_vel: Tuple[float, float, float],
-        desired_vel: Tuple[float, float, float],
-        heading: float = 0.0,
-    ) -> Tuple[Tuple[float, float, float], bool, str]:
-        """
-        Given the current LiDAR scan and desired nominal velocity,
-        computes the modified collision-free velocity vector.
-        
-        Returns:
-            (safe_velocity, is_avoiding_flag, status_description)
-        """
-        repulsive_x = 0.0
-        repulsive_y = 0.0
-        repulsive_z = 0.0
-        is_avoiding = False
-        active_threats = 0
-
-        cos_h = math.cos(heading)
-        sin_h = math.sin(heading)
-
-        # Evaluate each horizontal ray
         for i, dist in enumerate(lidar.ranges):
-            if 0.0 < dist < self.detection_distance:
-                is_avoiding = True
-                active_threats += 1
+            if not (0.0 < dist < self.detection_distance):
+                continue
+            bdx, bdy, _ = self.ray_dirs[i]
+            wdx = bdx * cos_h - bdy * sin_h
+            wdy = bdx * sin_h + bdy * cos_h
+            if (self.ignore_behind and dist > self.safety_distance and speed_xy > p["min_speed_for_direction"]
+                    and (wdx * desired_vel[0] + wdy * desired_vel[1]) / speed_xy < p["behind_cosine"]):
+                ranges[i] = lidar.max_range          # beside / behind the motion: ignore
+                continue
+            avoiding = True
+            d = max(dist, clamp)
+            strength = (self.detection_distance - d) / (self.detection_distance - clamp)
+            strength = min(strength, p["max_strength"]) ** p["strength_exponent"]
+            rep_x -= wdx * strength                  # push away from the ray direction
+            rep_y -= wdy * strength
 
-                # Normalize threat severity: 1.0 at safety distance, 0.0 at detection boundary
-                clamped_dist = max(dist, self.safety_distance * 0.5)
-                strength = (self.detection_distance - clamped_dist) / (self.detection_distance - self.safety_distance * 0.5)
-                strength = min(strength, 2.5) ** 1.5
+        if ground_check and desired_vel[2] < 0.0 and 0.0 < lidar.dist_down < p["ground_clearance"]:
+            rep_z += p["ground_push"]
+            avoiding = True
 
-                # Unit direction of ray in world frame
-                body_dx, body_dy, _ = self.ray_dirs[i]
-                world_dx = body_dx * cos_h - body_dy * sin_h
-                world_dy = body_dx * sin_h + body_dy * cos_h
-
-                # Repulsive force points OPPOSITE to ray direction
-                repulsive_x -= world_dx * strength
-                repulsive_y -= world_dy * strength
-
-        # Check vertical clearance
-        if 0.0 < lidar.dist_down < 0.35:
-            # Too close to ground/low roof: push up
-            repulsive_z += 1.0
-            is_avoiding = True
-
-        if not is_avoiding:
+        if not avoiding:
+            self._clear_count += 1
+            if self._clear_count >= self.clear_reset_steps:
+                self._circ_sign = None
             return desired_vel, False, "PATH CLEAR"
+        self._clear_count = 0
+        scan = LidarScan(ranges=ranges, dist_up=lidar.dist_up, dist_down=lidar.dist_down, max_range=lidar.max_range)
 
-        # Normalize and scale repulsive vector
-        rep_mag = math.sqrt(repulsive_x ** 2 + repulsive_y ** 2)
-        if rep_mag > 1e-4:
-            repulsive_x = (repulsive_x / rep_mag) * self.max_repulsive_speed
-            repulsive_y = (repulsive_y / rep_mag) * self.max_repulsive_speed
+        mag = math.hypot(rep_x, rep_y)
+        if mag > p["min_repulsion"]:
+            rep_x = rep_x / mag * self.max_repulsive_speed
+            rep_y = rep_y / mag * self.max_repulsive_speed
+            circ_x, circ_y = -rep_y, rep_x           # tangential (wall-following) direction
+            if self._circ_sign is None:
+                self._circ_sign = -1.0 if circ_x * desired_vel[0] + circ_y * desired_vel[1] < 0.0 else 1.0
+            rep_x += circ_x * self._circ_sign * p["circulation_weight"]
+            rep_y += circ_y * self._circ_sign * p["circulation_weight"]
+            tot = math.hypot(rep_x, rep_y)
+            if tot > self.max_repulsive_speed:
+                rep_x = rep_x / tot * self.max_repulsive_speed
+                rep_y = rep_y / tot * self.max_repulsive_speed
 
-            # Add tangential circulation to smoothly glide around building walls
-            # Circulation is orthogonal to repulsive direction: (-rep_y, rep_x)
-            # Choose circulation direction aligned with desired goal velocity
-            circ_x = -repulsive_y
-            circ_y = repulsive_x
-            dot_circ_goal = circ_x * desired_vel[0] + circ_y * desired_vel[1]
-            if dot_circ_goal < 0.0:
-                circ_x = -circ_x
-                circ_y = -circ_y
+        # blend: the closer the obstacle, the more avoidance overrides the nominal path
+        min_dist = scan.min_horizontal_dist
+        w_avoid = min(1.0, max(0.0, (self.detection_distance - min_dist) / (self.detection_distance - self.safety_distance)))
+        w_goal = max(p["min_goal_weight"], 1.0 - w_avoid)
+        vx = desired_vel[0] * w_goal + rep_x * w_avoid
+        vy = desired_vel[1] * w_goal + rep_y * w_avoid
+        vz = desired_vel[2] + rep_z * p["vertical_push_gain"]
 
-            circ_weight = 0.8
-            repulsive_x += circ_x * circ_weight
-            repulsive_y += circ_y * circ_weight
+        speed = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if speed > p["max_safe_speed"]:
+            k = p["max_safe_speed"] / speed
+            vx, vy, vz = vx * k, vy * k, vz * k
 
-            # Re-scale combined horizontal avoidance speed
-            tot_mag = math.sqrt(repulsive_x ** 2 + repulsive_y ** 2)
-            if tot_mag > self.max_repulsive_speed:
-                repulsive_x = (repulsive_x / tot_mag) * self.max_repulsive_speed
-                repulsive_y = (repulsive_y / tot_mag) * self.max_repulsive_speed
-
-        # Blend with nominal desired velocity
-        # The closer the obstacle, the more the avoidance overrides nominal path
-        min_dist = lidar.min_horizontal_dist
-        avoid_weight = min(1.0, max(0.0, (self.detection_distance - min_dist) / (self.detection_distance - self.safety_distance)))
-        goal_weight = max(0.15, 1.0 - avoid_weight)
-
-        safe_vx = desired_vel[0] * goal_weight + repulsive_x * avoid_weight
-        safe_vy = desired_vel[1] * goal_weight + repulsive_y * avoid_weight
-        safe_vz = desired_vel[2] + repulsive_z * 0.5
-
-        # Speed limit
-        tot_speed = math.sqrt(safe_vx ** 2 + safe_vy ** 2 + safe_vz ** 2)
-        MAX_SAFE_SPEED = 3.5
-        if tot_speed > MAX_SAFE_SPEED:
-            safe_vx = (safe_vx / tot_speed) * MAX_SAFE_SPEED
-            safe_vy = (safe_vy / tot_speed) * MAX_SAFE_SPEED
-            safe_vz = (safe_vz / tot_speed) * MAX_SAFE_SPEED
-
-        sector_names = ["FWD", "FWD-L", "LEFT", "REAR-L", "REAR", "REAR-R", "RIGHT", "FWD-R"]
-        threat_sector = sector_names[lidar.closest_sector]
-        status = f"AVOIDING [{threat_sector} {min_dist:.2f}m]"
-
-        return (safe_vx, safe_vy, safe_vz), True, status
+        status = f"AVOIDING [{sector_name(scan.closest_sector, self.beams)} {min_dist:.2f}m]"
+        return (vx, vy, vz), True, status

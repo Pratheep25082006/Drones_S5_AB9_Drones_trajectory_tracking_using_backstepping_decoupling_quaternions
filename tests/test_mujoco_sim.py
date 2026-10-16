@@ -63,44 +63,26 @@ def test_mujoco_simulation_step():
 
 
 def test_mujoco_target_tracking():
-    """Verify position progresses towards target (2, 2, 5) over time"""
+    """Full paper controller drives the MuJoCo rigid body (actuators only) to a hover point."""
+    from quadrotor_controller import PaperBacksteppingController, SetpointReferenceModel
+
     model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", "quadrotor.xml"))
     m = mujoco.MjModel.from_xml_path(model_path)
     d = mujoco.MjData(m)
-
-    initial_z = float(d.qpos[2])
-    target_z = 5.0
+    mujoco.mj_forward(m, d)
+    bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "quadrotor")
+    ctl = PaperBacksteppingController(mass=float(m.body_subtreemass[bid]), inertia=tuple(m.body_inertia[bid]))
+    rm = SetpointReferenceModel(tuple(d.qpos[0:3]), v_max=1.5)
+    rm.set_target((1.0, -1.0, 1.5), 0.5)
     dt = m.opt.timestep
-
-    # Step simulation 250 steps (0.5s)
-    for _ in range(250):
-        pos = (float(d.qpos[0]), float(d.qpos[1]), float(d.qpos[2]))
-        vel = (float(d.qvel[0]), float(d.qvel[1]), float(d.qvel[2]))
-        quat = (float(d.qpos[3]), float(d.qpos[4]), float(d.qpos[5]), float(d.qpos[6]))
-        ang_vel = (float(d.qvel[3]), float(d.qvel[4]), float(d.qvel[5]))
-
-        # Smooth position update towards target
-        dx = 2.0 - pos[0]
-        dy = 2.0 - pos[1]
-        dz = target_z - pos[2]
-        dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-
-        dir_x, dir_y, dir_z = dx / dist, dy / dist, dz / dist
-        target_speed = min(3.5, math.sqrt(2.0 * 1.8 * dist))
-
-        new_vx = vel[0] + (dir_x * target_speed - vel[0]) * 0.08
-        new_vy = vel[1] + (dir_y * target_speed - vel[1]) * 0.08
-        new_vz = vel[2] + (dir_z * target_speed - vel[2]) * 0.08
-
-        d.qpos[0] += new_vx * dt
-        d.qpos[1] += new_vy * dt
-        d.qpos[2] += new_vz * dt
-        d.qvel[0], d.qvel[1], d.qvel[2] = new_vx, new_vy, new_vz
-
+    for _ in range(int(12.0 / dt)):
+        ref = rm.step(dt)
+        s = ControllerState(tuple(d.qpos[0:3]), tuple(d.qvel[0:3]), tuple(d.qpos[3:7]), tuple(d.qvel[3:6]))
+        thrust, tau = ctl.compute(s, ref, dt)
+        d.ctrl[0] = thrust
+        d.ctrl[1:4] = tau
         mujoco.mj_step(m, d)
-
-    final_z = float(d.qpos[2])
-    assert final_z > initial_z, f"Quadrotor did not ascend! Initial={initial_z}, Final={final_z}"
+    assert np.linalg.norm(d.qpos[0:3] - np.array([1.0, -1.0, 1.5])) < 0.02
 
 
 def test_mujoco_mocap_beacon():

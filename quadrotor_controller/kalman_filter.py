@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import numpy as np
 
+from .config import cfg, pick
 from .controller import ControllerState
 
 
@@ -17,17 +18,17 @@ class SensorNoiseModel:
 
     def __init__(
         self,
-        pos_std: float = 0.05,       # standard deviation in meters (e.g. 5 cm)
-        vel_std: float = 0.08,       # standard deviation in m/s (e.g. 8 cm/s)
-        rate_std: float = 0.02,      # standard deviation in rad/s (~1.1 deg/s)
-        enabled: bool = True,
-        seed: Optional[int] = None,
+        pos_std: Optional[float] = None,    # config: noise.pos_std
+        vel_std: Optional[float] = None,    # config: noise.vel_std
+        rate_std: Optional[float] = None,   # config: noise.rate_std
+        enabled: Optional[bool] = None,     # config: noise.enabled
+        seed: Optional[int] = None,         # config: noise.seed (None there = random)
     ) -> None:
-        self.pos_std = float(pos_std)
-        self.vel_std = float(vel_std)
-        self.rate_std = float(rate_std)
-        self.enabled = enabled
-        self._rng = np.random.default_rng(seed)
+        self.pos_std = float(pick(pos_std, "noise.pos_std"))
+        self.vel_std = float(pick(vel_std, "noise.vel_std"))
+        self.rate_std = float(pick(rate_std, "noise.rate_std"))
+        self.enabled = bool(pick(enabled, "noise.enabled"))
+        self._rng = np.random.default_rng(pick(seed, "noise.seed"))
 
     def set_seed(self, seed: Optional[int]) -> None:
         self._rng = np.random.default_rng(seed)
@@ -89,17 +90,18 @@ class KalmanFilter:
 
     def __init__(
         self,
-        dt: float = 0.002,
-        process_noise_acc: float = 0.5,    # process acceleration noise std (m/s^2)
-        meas_pos_std: float = 0.05,        # position measurement noise std (m)
-        meas_vel_std: float = 0.08,        # velocity measurement noise std (m/s)
+        dt: Optional[float] = None,                 # config: python_sim.physics_dt
+        process_noise_acc: Optional[float] = None,  # config: estimator.process_noise_acc
+        meas_pos_std: Optional[float] = None,       # config: noise.pos_std
+        meas_vel_std: Optional[float] = None,       # config: noise.vel_std
         initial_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         initial_vel: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> None:
-        self.dt = float(dt)
-        self.process_noise_acc = float(process_noise_acc)
-        self.meas_pos_std = float(meas_pos_std)
-        self.meas_vel_std = float(meas_vel_std)
+        self.dt = float(pick(dt, "python_sim.physics_dt"))
+        self.process_noise_acc = float(pick(process_noise_acc, "estimator.process_noise_acc"))
+        self.meas_pos_std = float(pick(meas_pos_std, "noise.pos_std"))
+        self.meas_vel_std = float(pick(meas_vel_std, "noise.vel_std"))
+        self.dt_tolerance = float(cfg("estimator.dt_change_tolerance"))
 
         # State vector: [px, py, pz, vx, vy, vz]
         self.x = np.array([
@@ -109,8 +111,8 @@ class KalmanFilter:
 
         # Initial estimation error covariance P
         self.P = np.diag([
-            meas_pos_std**2, meas_pos_std**2, meas_pos_std**2,
-            meas_vel_std**2, meas_vel_std**2, meas_vel_std**2
+            self.meas_pos_std**2, self.meas_pos_std**2, self.meas_pos_std**2,
+            self.meas_vel_std**2, self.meas_vel_std**2, self.meas_vel_std**2
         ]).astype(np.float64)
 
         # Build dynamic matrices
@@ -176,7 +178,7 @@ class KalmanFilter:
             x_{k|k-1} = F * x_{k-1|k-1} + B * u
             P_{k|k-1} = F * P_{k-1|k-1} * F^T + Q
         """
-        if dt is not None and abs(dt - self.dt) > 1e-6:
+        if dt is not None and abs(dt - self.dt) > self.dt_tolerance:
             self._update_transition_matrices(dt)
 
         if acc_control is not None:
@@ -263,8 +265,8 @@ class AngularRateFilter:
     Denoises high-frequency gyro vibrations before passing to the attitude controller.
     """
 
-    def __init__(self, alpha: float = 0.25) -> None:
-        self.alpha = float(alpha)
+    def __init__(self, alpha: Optional[float] = None) -> None:
+        self.alpha = float(pick(alpha, "estimator.rate_filter_alpha"))
         self.filtered_rate = np.zeros(3, dtype=np.float64)
         self.initialized = False
 
@@ -296,11 +298,11 @@ class QuadrotorStateEstimator:
 
     def __init__(
         self,
-        dt: float = 0.002,
-        process_noise_acc: float = 0.5,
-        meas_pos_std: float = 0.05,
-        meas_vel_std: float = 0.08,
-        rate_filter_alpha: float = 0.25,
+        dt: Optional[float] = None,
+        process_noise_acc: Optional[float] = None,
+        meas_pos_std: Optional[float] = None,
+        meas_vel_std: Optional[float] = None,
+        rate_filter_alpha: Optional[float] = None,
         initial_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         initial_vel: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> None:

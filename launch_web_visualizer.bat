@@ -1,17 +1,12 @@
 @echo off
-title 3D Quadrotor Drone Visualizer & HUD
+title Quadrotor Web Telemetry Dashboard
+REM Host / ports / page: config.yaml -> bridge.  Set DRONES_PYTHON to use a specific Python.
+set "PY=python"
+if defined DRONES_PYTHON set "PY=%DRONES_PYTHON%"
 echo ========================================================
-echo   Launching 3D Quadrotor Drone Visualizer Server
+echo   Quadrotor web telemetry dashboard (paper controller)
 echo ========================================================
-echo.
-echo [1/2] Starting Telemetry Bridge & Server on Port 8080...
-start /b python d:\Drones\run_gazebo_bridge.py
-timeout /t 2 >nul
-
-echo [2/2] Opening 3D Visualizer HUD in Web Browser...
-start "" "http://127.0.0.1:8080/gazebo_visualizer.html"
-
-echo.
-echo [SUCCESS] 3D Visualizer is live in your browser!
-echo Press any key to stop the server...
-pause >nul
+pushd "%~dp0"
+"%PY%" run_gazebo_bridge.py --open-browser %*
+popd
+pause

@@ -1,32 +1,51 @@
 """
-WSL Native Gazebo UDP Pose Receiver
-Listens on UDP port 9090 and updates model pose directly inside Linux without spawning wsl.exe processes.
+WSL Gazebo UDP pose receiver: listens for (x, y, z, roll, pitch, yaw) float32 packets
+from run_gazebo_simulation.py and applies the newest pose with `gz model`
+(at most one gz process at a time, every gazebo.pose_period seconds).
+Settings: config.yaml -> gazebo.
 """
+import os
 import socket
 import struct
 import subprocess
+import sys
+import time
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind(("0.0.0.0", 9090))
-print("[WSL Sync] Gazebo UDP Pose Listener active on port 9090.")
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from quadrotor_controller.config import cfg  # noqa: E402
+from quadrotor_controller.gazebo_tools import gz_environment, gz_model_command  # noqa: E402
 
-gz_bin = "/root/.pixi/envs/gazebo/bin/gz"
+POSE_FORMAT = "ffffff"
+POSE_SIZE = struct.calcsize(POSE_FORMAT)
 
-while True:
-    try:
-        data, _ = sock.recvfrom(1024)
-        if len(data) == 24:
-            x, y, z, roll, pitch, yaw = struct.unpack("ffffff", data)
-            cmd = [
-                gz_bin, "model",
-                "-m", "quadrotor",
-                "-x", f"{x:.3f}",
-                "-y", f"{y:.3f}",
-                "-z", f"{z:.3f}",
-                "-R", f"{roll:.3f}",
-                "-P", f"{pitch:.3f}",
-                "-Y", f"{yaw:.3f}"
-            ]
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("", cfg("gazebo.udp_port")))
+    sock.setblocking(False)
+    print(f"[WSL Sync] Gazebo UDP pose listener on port {cfg('gazebo.udp_port')}.")
+    env = gz_environment()
+    latest, proc, last_sent = None, None, -float("inf")
+    period, poll, bufsize = cfg("gazebo.pose_period"), cfg("gazebo.receiver_poll"), cfg("gazebo.udp_buffer")
+    while True:
+        try:
+            while True:                       # drain the socket, keep only the newest pose
+                data, _ = sock.recvfrom(bufsize)
+                if len(data) == POSE_SIZE:
+                    latest = struct.unpack(POSE_FORMAT, data)
+        except BlockingIOError:
+            pass
+        now = time.time()
+        if latest is not None and now - last_sent >= period and (proc is None or proc.poll() is not None):
+            try:
+                proc = subprocess.Popen(gz_model_command(*latest), env=env,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                proc = None
+            last_sent = now
+        time.sleep(poll)
+
+
+if __name__ == "__main__":
+    main()

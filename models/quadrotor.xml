@@ -1,51 +1,22 @@
-<mujoco model="quadrotor_urban_city_world">
+<mujoco model="quadrotor_city">
+  <!-- Drone, sensors, actuators and target marker.  The city is generated into city.xml
+       by generate_world.py (config.yaml -> world) and shared with PyBullet and Gazebo. -->
   <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
   <option timestep="0.002" gravity="0 0 -9.81"/>
+  <size memory="32M"/>
 
   <visual>
-    <headlight ambient="0.45 0.45 0.5" diffuse="0.75 0.75 0.75" specular="0.25 0.25 0.25"/>
-    <rgba fog="0.7 0.82 0.95 1"/>
-    <global azimuth="135" elevation="-25"/>
-    <quality shadowsize="4096"/>
+    <headlight ambient="0.42 0.42 0.46" diffuse="0.6 0.6 0.6" specular="0.15 0.15 0.15"/>
+    <rgba fog="0.78 0.85 0.93 1" haze="0.8 0.86 0.94 1"/>
+    <map fogstart="2.5" fogend="6" haze="0.4" shadowclip="40" zfar="200"/>
+    <global azimuth="135" elevation="-25" offwidth="1920" offheight="1080"/>
+    <quality shadowsize="8192" offsamples="8"/>
   </visual>
 
+  <include file="city.xml"/>
+
   <asset>
-    <!-- Sky & Terrains -->
-    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.4 0.65 0.9" rgb2="0.8 0.88 0.98" width="512" height="512"/>
-    <texture name="grass_tex" type="2d" builtin="checker" width="512" height="512" rgb1="0.22 0.38 0.18" rgb2="0.18 0.32 0.14"/>
-    <material name="grass_mat" texture="grass_tex" texrepeat="50 50" reflectance="0.05" roughness="0.9"/>
-    
-    <!-- Urban City Materials -->
-    <texture name="road_tex" type="2d" builtin="checker" width="512" height="512" rgb1="0.16 0.16 0.17" rgb2="0.14 0.14 0.15"/>
-    <material name="road_mat" texture="road_tex" texrepeat="25 25" reflectance="0.15" roughness="0.8"/>
-    <material name="sidewalk_mat" rgba="0.75 0.75 0.78 1" roughness="0.7"/>
-    <material name="road_line_yellow" rgba="0.95 0.82 0.1 1"/>
-    <material name="road_line_white" rgba="0.95 0.95 0.95 1"/>
-    
-    <!-- Building & Skyscraper Materials -->
-    <material name="glass_blue" rgba="0.15 0.45 0.75 0.9" specular="0.9" shininess="0.9" reflectance="0.4"/>
-    <material name="glass_dark" rgba="0.12 0.18 0.25 0.95" specular="0.8" shininess="0.85" reflectance="0.3"/>
-    <material name="concrete_facade" rgba="0.65 0.66 0.68 1" roughness="0.6"/>
-    <material name="brick_facade" rgba="0.65 0.35 0.25 1" roughness="0.8"/>
-    <material name="building_spire" rgba="0.85 0.85 0.9 1" specular="1.0"/>
-    <material name="beacon_red" rgba="1.0 0.15 0.1 1"/>
-
-    <!-- Urban Foliage & Street Props -->
-    <material name="tree_wood" rgba="0.35 0.22 0.12 1" roughness="0.9"/>
-    <material name="tree_leaves" rgba="0.18 0.55 0.18 1" roughness="0.9"/>
-    <material name="streetlamp_mat" rgba="0.2 0.25 0.28 1"/>
-    <material name="lamp_glow" rgba="1.0 0.95 0.7 0.9"/>
-
-    <!-- Central Helipad & Target Materials -->
-    <material name="helipad_yellow" rgba="0.95 0.8 0.1 1" shininess="0.8"/>
-    <material name="helipad_white" rgba="0.95 0.95 0.95 1"/>
-    <material name="helipad_dark" rgba="0.18 0.18 0.2 1"/>
-    <material name="gate_orange" rgba="1.0 0.4 0.05 1" shininess="0.9"/>
-    <material name="gate_cyan" rgba="0.0 0.85 1.0 1" shininess="0.9"/>
     <material name="target_glow" rgba="1.0 0.2 0.3 0.65"/>
-    <material name="pylon_stripe1" rgba="0.9 0.2 0.15 1"/>
-
-    <!-- Drone Materials -->
     <material name="carbon_fiber" rgba="0.12 0.13 0.15 1" specular="0.6" shininess="0.8"/>
     <material name="canopy_mat" rgba="0.05 0.6 0.9 0.85" specular="1.0" shininess="0.9"/>
     <material name="arm_mat" rgba="0.2 0.2 0.22 1" specular="0.4"/>
@@ -56,131 +27,11 @@
   </asset>
 
   <worldbody>
-    <!-- Ground & Sky Lighting -->
-    <geom name="ground" type="plane" size="100 100 0.1" material="grass_mat"/>
-    <light name="sun" directional="true" pos="25 15 40" dir="-0.4 -0.3 -1" castshadow="true" diffuse="0.9 0.88 0.85" specular="0.3 0.3 0.3"/>
-    <light name="fill_light" directional="true" pos="-20 -15 25" dir="0.4 0.3 -0.8" castshadow="false" diffuse="0.35 0.4 0.45"/>
-
-    <!-- Dynamic Mocap Target Beacon -->
     <body name="target_marker" mocap="true" pos="0 0 2">
-      <geom name="target_sphere" type="sphere" size="0.12" material="target_glow" conaffinity="0" contype="0"/>
-      <geom name="target_ring" type="cylinder" size="0.22 0.01" material="target_glow" conaffinity="0" contype="0"/>
+      <geom group="2" name="target_sphere" type="sphere" size="0.12" material="target_glow" conaffinity="0" contype="0"/>
+      <geom group="2" name="target_ring" type="cylinder" size="0.22 0.01" material="target_glow" conaffinity="0" contype="0"/>
     </body>
 
-    <!-- ============================================================= -->
-    <!-- URBAN CITY ENVIRONMENT: ROADS, STREETS & SIDEWALKS             -->
-    <!-- ============================================================= -->
-    <!-- Main Avenue North-South (Width 8m, Length 50m) -->
-    <geom name="avenue_ns" type="box" pos="0 0 0.003" size="4.0 25.0 0.003" material="road_mat"/>
-    <geom name="avenue_ew" type="box" pos="0 0 0.003" size="25.0 4.0 0.003" material="road_mat"/>
-    <!-- Yellow Dividing Lines -->
-    <geom name="line_ns" type="box" pos="0 0 0.005" size="0.08 24.0 0.002" material="road_line_yellow"/>
-    <geom name="line_ew" type="box" pos="0 0 0.005" size="24.0 0.08 0.002" material="road_line_yellow"/>
-    
-    <!-- Central Helipad Plaza (Elevated Pad on Central Plaza) -->
-    <geom name="plaza_pavement" type="box" pos="0 0 0.007" size="5.5 5.5 0.004" material="sidewalk_mat"/>
-    <geom name="helipad_circle" type="cylinder" pos="0 0 0.012" size="2.5 0.005" material="helipad_dark"/>
-    <geom name="helipad_ring" type="cylinder" pos="0 0 0.014" size="2.4 0.003" material="helipad_yellow"/>
-    <geom name="helipad_inner" type="cylinder" pos="0 0 0.016" size="2.2 0.003" material="helipad_dark"/>
-    <!-- Helipad 'H' Marking -->
-    <geom name="h_bar_left" type="box" pos="-0.6 0 0.018" size="0.12 0.75 0.002" material="helipad_white"/>
-    <geom name="h_bar_right" type="box" pos="0.6 0 0.018" size="0.12 0.75 0.002" material="helipad_white"/>
-    <geom name="h_bar_center" type="box" pos="0 0 0.018" size="0.48 0.12 0.002" material="helipad_white"/>
-
-    <!-- ============================================================= -->
-    <!-- SKYSCRAPERS & URBAN BUILDING BLOCKS                           -->
-    <!-- ============================================================= -->
-    <!-- Building Block 1: Metropolitan Glass Skyscraper (North-East, 13m tall) -->
-    <body name="skyscraper_metro" pos="9 9 0">
-      <geom name="metro_base" type="box" pos="0 0 2.0" size="2.5 2.5 2.0" material="concrete_facade"/>
-      <geom name="metro_tower" type="box" pos="0 0 7.5" size="2.0 2.0 5.5" material="glass_blue"/>
-      <geom name="metro_crown" type="box" pos="0 0 13.5" size="1.6 1.6 0.5" material="concrete_facade"/>
-      <geom name="metro_spire" type="cylinder" pos="0 0 15.0" size="0.06 1.0" material="building_spire"/>
-      <geom name="metro_beacon" type="sphere" pos="0 0 16.1" size="0.12" material="beacon_red"/>
-    </body>
-
-    <!-- Building Block 2: Financial Center Tower (North-West, 11m tall) -->
-    <body name="skyscraper_finance" pos="-9 9 0">
-      <geom name="fin_base" type="box" pos="0 0 2.5" size="2.8 2.8 2.5" material="concrete_facade"/>
-      <geom name="fin_mid" type="box" pos="0 0 6.5" size="2.2 2.2 4.0" material="glass_dark"/>
-      <geom name="fin_top" type="box" pos="0 0 11.2" size="1.7 1.7 1.5" material="glass_blue"/>
-      <geom name="fin_roof" type="box" pos="0 0 12.85" size="1.4 1.4 0.15" material="concrete_facade"/>
-    </body>
-
-    <!-- Building Block 3: Tech Innovation Complex (South-East, 10m tall) -->
-    <body name="building_tech" pos="9 -9 0">
-      <geom name="tech_podium" type="box" pos="0 0 2.0" size="3.0 3.0 2.0" material="concrete_facade"/>
-      <geom name="tech_block1" type="box" pos="0.3 0 5.5" size="2.0 2.2 3.5" material="glass_dark"/>
-      <geom name="tech_block2" type="box" pos="-0.3 0 8.0" size="1.8 1.8 2.0" material="brick_facade"/>
-      <geom name="tech_roof" type="box" pos="0 0 10.2" size="1.6 1.6 0.2" material="concrete_facade"/>
-    </body>
-
-    <!-- Building Block 4: Residential Plaza Towers (South-West, 8.5m tall) -->
-    <body name="building_residential" pos="-9 -9 0">
-      <geom name="res_tower1" type="box" pos="-0.8 -0.8 4.2" size="1.5 1.5 4.2" material="brick_facade"/>
-      <geom name="res_tower2" type="box" pos="0.8 0.8 3.5" size="1.3 1.3 3.5" material="concrete_facade"/>
-      <geom name="res_connector" type="box" pos="0 0 3.5" size="0.6 0.6 0.8" material="glass_blue"/>
-    </body>
-
-    <!-- Corridor Urban Building Block A (Front-Left Obstacle: x=1.8, y=1.8, h=3.2m) -->
-    <body name="city_block_obstacle_ne" pos="1.8 1.8 0">
-      <geom name="block_ne_bldg" type="box" pos="0 0 1.6" size="0.6 0.6 1.6" material="brick_facade"/>
-      <geom name="block_ne_roof" type="box" pos="0 0 3.3" size="0.65 0.65 0.1" material="concrete_facade"/>
-      <geom name="block_ne_antenna" type="cylinder" pos="0 0 3.7" size="0.03 0.3" material="building_spire"/>
-    </body>
-
-    <!-- Corridor Urban Building Block B (West Flank Obstacle: x=-2.0, y=0.5, h=2.8m) -->
-    <body name="city_block_obstacle_w" pos="-2.0 0.5 0">
-      <geom name="block_w_bldg" type="box" pos="0 0 1.4" size="0.55 0.7 1.4" material="concrete_facade"/>
-      <geom name="block_w_glass" type="box" pos="0 0 1.4" size="0.57 0.4 0.6" material="glass_blue"/>
-      <geom name="block_w_roof" type="box" pos="0 0 2.9" size="0.6 0.75 0.1" material="brick_facade"/>
-    </body>
-
-    <!-- Corridor Urban Building Block C (South Flank Obstacle: x=0.5, y=-2.0, h=3.0m) -->
-    <body name="city_block_obstacle_s" pos="0.5 -2.0 0">
-      <geom name="block_s_bldg" type="box" pos="0 0 1.5" size="0.7 0.55 1.5" material="glass_dark"/>
-      <geom name="block_s_roof" type="box" pos="0 0 3.1" size="0.75 0.6 0.1" material="concrete_facade"/>
-    </body>
-
-    <!-- Legacy flight obstacle alias for backward compatibility -->
-    <geom name="flight_obstacle" type="cylinder" pos="1.8 1.8 0.01" size="0.01 0.01" material="pylon_stripe1" conaffinity="0" contype="0"/>
-
-    <!-- ============================================================= -->
-    <!-- URBAN STREET PROPS: TREES & STREETLAMPS                       -->
-    <!-- ============================================================= -->
-    <!-- City Trees in Perimeter Parks (away from camera sightline) -->
-    <body name="tree_1" pos="6.5 6.5 0">
-      <geom name="tree1_trunk" type="cylinder" pos="0 0 0.7" size="0.1 0.7" material="tree_wood"/>
-      <geom name="tree1_crown" type="sphere" pos="0 0 1.8" size="0.75" material="tree_leaves"/>
-    </body>
-    <body name="tree_2" pos="-6.5 6.5 0">
-      <geom name="tree2_trunk" type="cylinder" pos="0 0 0.7" size="0.1 0.7" material="tree_wood"/>
-      <geom name="tree2_crown" type="sphere" pos="0 0 1.8" size="0.75" material="tree_leaves"/>
-    </body>
-    <body name="tree_3" pos="-6.5 -6.5 0">
-      <geom name="tree3_trunk" type="cylinder" pos="0 0 0.7" size="0.1 0.7" material="tree_wood"/>
-      <geom name="tree3_crown" type="sphere" pos="0 0 1.8" size="0.75" material="tree_leaves"/>
-    </body>
-    <body name="tree_4" pos="6.5 -6.5 0">
-      <geom name="tree4_trunk" type="cylinder" pos="0 0 0.7" size="0.1 0.7" material="tree_wood"/>
-      <geom name="tree4_crown" type="sphere" pos="0 0 1.8" size="0.75" material="tree_leaves"/>
-    </body>
-
-    <!-- Streetlamps -->
-    <body name="lamp_ne" pos="2.5 0.5 0">
-      <geom name="lamp_pole_ne" type="cylinder" pos="0 0 1.2" size="0.04 1.2" material="streetlamp_mat"/>
-      <geom name="lamp_arm_ne" type="box" pos="0.15 0 2.4" size="0.18 0.03 0.03" material="streetlamp_mat"/>
-      <geom name="lamp_head_ne" type="sphere" pos="0.3 0 2.35" size="0.08" material="lamp_glow"/>
-    </body>
-    <body name="lamp_sw" pos="-2.5 -0.5 0">
-      <geom name="lamp_pole_sw" type="cylinder" pos="0 0 1.2" size="0.04 1.2" material="streetlamp_mat"/>
-      <geom name="lamp_arm_sw" type="box" pos="-0.15 0 2.4" size="0.18 0.03 0.03" material="streetlamp_mat"/>
-      <geom name="lamp_head_sw" type="sphere" pos="-0.3 0 2.35" size="0.08" material="lamp_glow"/>
-    </body>
-
-    <!-- ============================================================= -->
-    <!-- QUADROTOR VEHICLE WITH 360-DEGREE MULTI-BEAM LIDAR SENSORS    -->
-    <!-- ============================================================= -->
     <body name="quadrotor" pos="0 0 0.15">
       <freejoint name="root"/>
       <inertial pos="0 0 0" mass="1.5" fullinertia="0.03 0.03 0.05 0 0 0"/>

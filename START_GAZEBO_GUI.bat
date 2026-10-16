@@ -1,15 +1,12 @@
 @echo off
-title Launch Native Gazebo 11 - 3D Quadrotor Simulation
-color 0A
+title Gazebo 11 (WSL) - 3D Quadrotor Simulation
+REM Starts VcXsrv and Gazebo 11 inside WSL; WSL distro, Pixi path, VcXsrv path etc.: config.yaml -> gazebo
+set "PY=python"
+if defined DRONES_PYTHON set "PY=%DRONES_PYTHON%"
 echo =================================================================
-echo        LAUNCHING NATIVE GAZEBO 11 - 3D QUADROTOR SIMULATION
+echo   GAZEBO 11 (WSL) - DE MONTE ^& LOHMANN (2013) BACKSTEPPING
 echo =================================================================
-echo.
-echo [1/2] Ensuring WSL Ubuntu environment is ready...
-wsl -d Ubuntu -u root bash -c "mkdir -p /run/user/0 && chmod 700 /run/user/0 && chmod 777 /tmp/.X11-unix 2>/dev/null"
-
-echo [2/2] Launching Native Gazebo 11 GUI + Flight Controller...
-echo.
-wsl -d Ubuntu -u root bash /mnt/d/Drones/run_gazebo.sh
-
+pushd "%~dp0"
+"%PY%" launch_gazebo_wsl.py %*
+popd
 pause

@@ -319,6 +319,7 @@
         <div class="controls-card">
             <button class="btn-mode active" id="btn-setpoint" onclick="setMode('setpoint')">Setpoint Target</button>
             <button class="btn-mode" id="btn-helix" onclick="setMode('helix')">Vertical Helix</button>
+            <button class="btn-mode" id="btn-auto" onclick="setMode('auto')">Mission</button>
         </div>
     </div>
 
@@ -497,9 +498,15 @@
         // WebSocket Telemetry Connection & Rendering Loop
         // -------------------------------------------------------------
         let socket;
+        // Inserted by run_gazebo_bridge.py from config.yaml -> bridge (open the page through the bridge)
+        const DASHBOARD_CONFIG = /*DASHBOARD_CONFIG*/null;
 
         function connectWebSocket() {
-            socket = new WebSocket("ws://127.0.0.1:8081");
+            if (!DASHBOARD_CONFIG) {
+                document.getElementById('ws-status').innerText = "WS: open this page via run_gazebo_bridge.py";
+                return;
+            }
+            socket = new WebSocket(`ws://${DASHBOARD_CONFIG.ws_host || location.hostname}:${DASHBOARD_CONFIG.ws_port}`);
 
             socket.onopen = () => {
                 document.getElementById('ws-status').innerText = "WS: Connected";
@@ -537,7 +544,7 @@
             socket.onclose = () => {
                 document.getElementById('ws-status').innerText = "WS: Reconnecting...";
                 document.getElementById('ws-status').style.color = "#f59e0b";
-                setTimeout(connectWebSocket, 2000);
+                setTimeout(connectWebSocket, DASHBOARD_CONFIG.reconnect_ms);
             };
         }
 
@@ -546,6 +553,7 @@
         function setMode(mode) {
             document.getElementById('btn-setpoint').classList.toggle('active', mode === 'setpoint');
             document.getElementById('btn-helix').classList.toggle('active', mode === 'helix');
+            const ba = document.getElementById('btn-auto'); if (ba) ba.classList.toggle('active', mode === 'auto');
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ set_mode: mode }));
             }
