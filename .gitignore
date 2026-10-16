@@ -14,3 +14,4 @@ Claude outputs/
 gazebo_plugin/build/
 results/trajectory_*.csv
 results/trajectory_*.json
+!docs/images/*.png
