@@ -8,19 +8,19 @@ Noise: sigma_pos = 0.05 m, sigma_vel = 0.08 m/s, sigma_gyro = 0.02 rad/s, fed th
 
 | Experiment | Controller | Sensors | RMSE (cm) | Max error (cm) | Heading RMSE (deg) | Max speed (m/s) | Max tilt (deg) | Torque chatter |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| Fig. 3 switched set points | Full 4-step paper law | ideal | 0.01 | 0.04 | 0.00 | 1.46 | 12.8 | 0.32 |
-| Fig. 3 switched set points | Full 4-step paper law | noise + KF | 0.61 | 1.36 | 0.13 | 1.47 | 13.0 | 3.02 |
-| Fig. 3 switched set points | Simplified 2-step (old) | ideal | 13.60 | 36.61 | 8.12 | 1.86 | 16.5 | 0.18 |
-| Fig. 3 switched set points | Simplified 2-step (old) | noise + KF | 13.41 | 36.51 | 8.09 | 1.85 | 16.6 | 2.98 |
-| Fig. 4 vertical helix | Full 4-step paper law | ideal | 0.00 | 0.01 | 0.00 | 2.02 | 11.8 | 0.01 |
-| Fig. 4 vertical helix | Full 4-step paper law | noise + KF | 0.65 | 1.29 | 0.05 | 2.02 | 12.0 | 3.01 |
-| Fig. 4 vertical helix | Simplified 2-step (old) | ideal | 20.62 | 27.41 | 6.60 | 2.33 | 13.7 | 0.02 |
-| Fig. 4 vertical helix | Simplified 2-step (old) | noise + KF | 20.66 | 27.81 | 6.59 | 2.34 | 13.6 | 2.99 |
+| Switched set points | Full 4-step paper law | ideal | 0.01 | 0.04 | 0.00 | 1.46 | 12.8 | 0.32 |
+| Switched set points | Full 4-step paper law | noise + KF | 0.61 | 1.36 | 0.13 | 1.47 | 13.0 | 3.02 |
+| Switched set points | Simplified 2-step (old) | ideal | 13.60 | 36.61 | 8.12 | 1.86 | 16.5 | 0.18 |
+| Switched set points | Simplified 2-step (old) | noise + KF | 13.41 | 36.51 | 8.09 | 1.85 | 16.6 | 2.98 |
+| Vertical helix | Full 4-step paper law | ideal | 0.00 | 0.01 | 0.00 | 2.02 | 11.8 | 0.01 |
+| Vertical helix | Full 4-step paper law | noise + KF | 0.65 | 1.29 | 0.05 | 2.02 | 12.0 | 3.01 |
+| Vertical helix | Simplified 2-step (old) | ideal | 20.62 | 27.41 | 6.60 | 2.33 | 13.7 | 0.02 |
+| Vertical helix | Simplified 2-step (old) | noise + KF | 20.66 | 27.81 | 6.59 | 2.34 | 13.6 | 2.99 |
 | Mission (takeoff-helix-fig8) | Full 4-step paper law | ideal | 0.01 | 0.03 | 0.00 | 2.02 | 12.6 | 0.04 |
 | Mission (takeoff-helix-fig8) | Full 4-step paper law | noise + KF | 0.64 | 1.34 | 0.04 | 2.03 | 12.4 | 3.00 |
 | Mission (takeoff-helix-fig8) | Simplified 2-step (old) | ideal | 16.99 | 34.38 | 4.00 | 2.33 | 17.9 | 0.04 |
 | Mission (takeoff-helix-fig8) | Simplified 2-step (old) | noise + KF | 17.01 | 33.73 | 3.99 | 2.34 | 17.5 | 2.98 |
-| Fig. 4 vertical helix | Full 4-step paper law | noise, no filter | 0.59 | 1.18 | 0.03 | - | - | 249.29 |
+| Vertical helix | Full 4-step paper law | noise, no filter | 0.59 | 1.18 | 0.03 | - | - | 249.29 |
 
 Helix metrics exclude the first 6.25 s after start, like the paper's plot window.
 

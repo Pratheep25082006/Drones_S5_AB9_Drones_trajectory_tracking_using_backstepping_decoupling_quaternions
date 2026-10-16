@@ -45,17 +45,17 @@ Amrita Vishwa Vidyapeetham
 
 ## Abstract
 
-This project implements the complete backstepping trajectory tracking controller of De Monte and Lohmann (2013) for a quadrotor helicopter. The attitude quaternion is split into a tilt part $q_{xy}$, which orients the thrust vector, and a heading part $q_z$. With this split, the translational dynamics and the yaw dynamics decouple. Position is controlled by a four-step backstepping design with a dynamic thrust extension, and heading by an independent two-step design. Both come with a Lyapunov proof of asymptotic stability.
+This project implements the complete backstepping trajectory tracking controller of De Monte and Lohmann (2013) for a quadrotor helicopter. The attitude quaternion is split into a tilt part $`q_{xy}`$, which orients the thrust vector, and a heading part $`q_z`$. With this split, the translational dynamics and the yaw dynamics decouple. Position is controlled by a four-step backstepping design with a dynamic thrust extension, and heading by an independent two-step design. Both come with a Lyapunov proof of asymptotic stability.
 
 The paper's controller is extended into a full guidance, navigation and control system:
 
 - **Noise and filtering:** Gaussian sensor noise on position, velocity and gyro, a 6-state Kalman filter that uses the controller's model acceleration as input, and a gyro filter.
 - **Obstacle detection:** a 10-beam LiDAR and a reactive avoider (repulsive field, wall-following circulation, side memory).
-- **Trajectory redirection:** a global path planner (A* on the city map, targets inside buildings moved out, over-the-top fallback). Its corners are rounded into one smooth $C^1$ curve that the drone follows through a $C^4$ reference model.
+- **Trajectory redirection:** a global path planner (A* on the city map, targets inside buildings moved out, over-the-top fallback). Its corners are rounded into one smooth $`C^1`$ curve that the drone follows through a $`C^4`$ reference model.
 
 The same code flies a 1.5 kg quadrotor in MuJoCo and a 27 g Crazyflie in PyBullet under real rigid-body dynamics. It also drives Gazebo 11 and a 3D web dashboard through a 500 Hz Python flight core. The dashboard shows live trajectory values and charts, checks whether a route between buildings is possible before flying, and exports all trajectory values once per second. An ArduPilot / MAVLink bridge runs the full ground-station pre-flight sequence.
 
-The paper's set-point (Fig. 3) and vertical-helix (Fig. 4) experiments are reproduced with sub-centimetre error. With noise and the Kalman filter, every simulator tracks the mission with about 0.5–0.7 cm RMS error. In the city, the drone reaches targets behind and between buildings while keeping more than 1.5 m from every obstacle.
+The paper's switched set-point and vertical-helix experiments are reproduced with sub-centimetre error. With noise and the Kalman filter, every simulator tracks the mission with about 0.5–0.7 cm RMS error. In the city, the drone reaches targets behind and between buildings while keeping more than 1.5 m from every obstacle.
 
 ---
 
@@ -67,7 +67,7 @@ Autonomous quadrotor flight needs two things at once: a trajectory that is dynam
 
 **Backstepping.** Backstepping is a recursive, Lyapunov-based design for systems in cascade form (position → velocity → thrust → angular rate). At each step a virtual control drives one error to zero, and the Lyapunov function is extended by that error. The result is a constructive proof of stability for the complete closed loop.
 
-**Decoupling quaternion parametrization.** The key idea of the base paper is the factorization $q = q_{xy} \circ q_z$. The tilt quaternion $q_{xy}$ alone determines the direction of the thrust and therefore the translational motion. The heading quaternion $q_z$ determines only the yaw. Position and heading can therefore be controlled by two independent laws, and all control signals can be derived analytically.
+**Decoupling quaternion parametrization.** The key idea of the base paper is the factorization $`q = q_{xy} \circ q_z`$. The tilt quaternion $`q_{xy}`$ alone determines the direction of the thrust and therefore the translational motion. The heading quaternion $`q_z`$ determines only the yaw. Position and heading can therefore be controlled by two independent laws, and all control signals can be derived analytically.
 
 ---
 
@@ -75,7 +75,7 @@ Autonomous quadrotor flight needs two things at once: a trajectory that is dynam
 
 Develop and simulate a real-time trajectory tracking system for a quadrotor that:
 
-- Represents the attitude by a unit quaternion, decomposed into tilt $q_{xy}$ and heading $q_z$ (no gimbal lock, no unwinding).
+- Represents the attitude by a unit quaternion, decomposed into tilt $`q_{xy}`$ and heading $`q_z`$ (no gimbal lock, no unwinding).
 - Implements the paper's full backstepping law: four-step position control with dynamic thrust extension, and heading control.
 - Tracks the paper's reference trajectories (switched set points, vertical helix) and project trajectories (figure-8, mission, arbitrary set points).
 - Works with realistic sensors: additive Gaussian noise on position, velocity and gyro, with a Kalman filter for state estimation.
@@ -92,7 +92,7 @@ P. De Monte and B. Lohmann (2013). "Trajectory Tracking Control for a Quadrotor 
 
 ### Main contributions of the paper
 
-- A factorization of the attitude quaternion into tilt ($q_{xy}$) and heading ($q_z$) quaternions, free of ambiguity ($q_p \ge 0$, $q_w \ge 0$).
+- A factorization of the attitude quaternion into tilt ($`q_{xy}`$) and heading ($`q_z`$) quaternions, free of ambiguity ($`q_p \ge 0`$, $`q_w \ge 0`$).
 - Proof that this decomposition decouples the translational dynamics from the yaw dynamics.
 - A backstepping trajectory tracking law with an analytical Lyapunov stability proof, in which every control signal is derived analytically.
 - Experimental validation on an AscTec Hummingbird with a Vicon motion-capture system.
@@ -101,13 +101,13 @@ P. De Monte and B. Lohmann (2013). "Trajectory Tracking Control for a Quadrotor 
 
 The complete method of the paper is in `quadrotor_controller/paper_controller.py`:
 
-- the quaternion decomposition (eqs. 10–14)
-- the thrust-vector and heading kinematics (eqs. 15, 22–24, 27)
-- the input transformation (eq. 29) and the dynamic thrust extension (eq. 31)
-- the four-step position backstepping (eqs. 32–46) and the heading backstepping (eqs. 47–54)
+- the quaternion decomposition
+- the thrust-vector and heading kinematics
+- the input transformation and the dynamic thrust extension
+- the four-step position backstepping and the heading backstepping
 - the paper's gains
 
-`track_error.py` reproduces the paper's Fig. 3 and Fig. 4 experiments. The earlier simplified two-step law (`controller.py`) is kept as a baseline.
+`track_error.py` reproduces the paper's switched set-point and vertical-helix experiments. The earlier simplified two-step law (`controller.py`) is kept as a baseline.
 
 ---
 
@@ -131,71 +131,71 @@ flowchart LR
 
 The paper writes a unit quaternion with the vector part first and the scalar part last:
 
-$$
-q = [\,q_1\ \ q_2\ \ q_3\ \ q_4\,]^\top = \Big[\,a^\top \sin\tfrac{\alpha}{2}\ \ \ \cos\tfrac{\alpha}{2}\,\Big]^\top, \qquad \lVert q\rVert = 1 \qquad (1)
-$$
+```math
+q = [\,q_1\ \ q_2\ \ q_3\ \ q_4\,]^\top = \Big[\,a^\top \sin\tfrac{\alpha}{2}\ \ \ \cos\tfrac{\alpha}{2}\,\Big]^\top, \qquad \lVert q\rVert = 1
+```
 
-Here $a$ is the rotation axis and $\alpha$ the rotation angle. A vector given in the body frame B is transformed to the inertial frame I by $^{I}x = R(q)\,{}^{B}x$ (eqs. 2–3). The quaternion kinematics are
+Here $`a`$ is the rotation axis and $`\alpha`$ the rotation angle. A vector given in the body frame B is transformed to the inertial frame I by $`^{I}x = R(q)\,{}^{B}x`$. The quaternion kinematics are
 
-$$
+```math
 \dot q = \tfrac12\,Q(q)\begin{bmatrix}\omega\\ 0\end{bmatrix}, \qquad
-Q(q) = \begin{bmatrix} q_4 & -q_3 & q_2 & q_1\\ q_3 & q_4 & -q_1 & q_2\\ -q_2 & q_1 & q_4 & q_3\\ -q_1 & -q_2 & -q_3 & q_4\end{bmatrix} \qquad (4)
-$$
+Q(q) = \begin{bmatrix} q_4 & -q_3 & q_2 & q_1\\ q_3 & q_4 & -q_1 & q_2\\ -q_2 & q_1 & q_4 & q_3\\ -q_1 & -q_2 & -q_3 & q_4\end{bmatrix}
+```
 
-where $\omega$ is the angular velocity of the body, expressed in the body frame. $Q(p)\,r$ is the quaternion product $p \circ r$.
+where $`\omega`$ is the angular velocity of the body, expressed in the body frame. $`Q(p)\,r`$ is the quaternion product $`p \circ r`$.
 
-> **Conventions in the code.** The code stores quaternions scalar-first, $q = (w, x, y, z) = (q_4, q_1, q_2, q_3)$.
+> **Conventions in the code.** The code stores quaternions scalar-first, $`q = (w, x, y, z) = (q_4, q_1, q_2, q_3)`$.
 >
-> The world frame is ENU (z up) and the body frame is FLU, so the thrust acts along $+z_B$ and gravity is $g = (0, 0, -9.81)$ m/s². The paper uses NED with the thrust along $-z_B$. After this sign change all equations are identical.
+> The world frame is ENU (z up) and the body frame is FLU, so the thrust acts along $`+z_B`$ and gravity is $`g = (0, 0, -9.81)`$ m/s². The paper uses NED with the thrust along $`-z_B`$. After this sign change all equations are identical.
 
 ### 4.2 Decoupling attitude parametrization
 
 The rotation from I to B is split into two consecutive rotations through an auxiliary frame A whose z-axis coincides with the body z-axis:
 
-$$
-q = q_{xy} \circ q_z = Q(q_{xy})\,q_z \qquad (5)
-$$
+```math
+q = q_{xy} \circ q_z = Q(q_{xy})\,q_z
+```
 
 | Quaternion | Structure | Meaning | Degrees of freedom |
 |---|---|---|---|
-| $q_{xy} = [\,q_x\ \ q_y\ \ 0\ \ q_p\,]^\top$ (6) | rotation about an axis in the horizontal plane | **tilt**: orientation of the thrust vector | 2, since $q_p^2+q_x^2+q_y^2 = 1$ (7) |
-| $q_z = [\,0\ \ 0\ \ q_z\ \ q_w\,]^\top$ (8) | rotation about the body z-axis | **heading** (yaw) | 1, since $q_w^2+q_z^2 = 1$ (9) |
+| $`q_{xy} = [\,q_x\ \ q_y\ \ 0\ \ q_p\,]^\top`$ | rotation about an axis in the horizontal plane | **tilt**: orientation of the thrust vector | 2, since $`q_p^2+q_x^2+q_y^2 = 1`$ |
+| $`q_z = [\,0\ \ 0\ \ q_z\ \ q_w\,]^\top`$ | rotation about the body z-axis | **heading** (yaw) | 1, since $`q_w^2+q_z^2 = 1`$ |
 
-The components are computed from the full quaternion (eqs. 11–14):
+The components are computed from the full quaternion:
 
-$$
+```math
 q_p = \sqrt{q_3^2 + q_4^2}, \qquad
 q_x = \frac{q_4\,q_1 - q_3\,q_2}{q_p}, \qquad
 q_y = \frac{q_4\,q_2 + q_3\,q_1}{q_p}
-$$
+```
 
-$$
-q_w = \frac{|q_4|}{q_p}, \qquad q_z = \operatorname{sgn}(q_3 q_4)\,\frac{|q_3|}{q_p}, \qquad \operatorname{sgn}(0) = +1
-$$
+```math
+q_w = \frac{|q_4|}{q_p}, \qquad q_z = \mathrm{sgn}(q_3 q_4)\,\frac{|q_3|}{q_p}, \qquad \mathrm{sgn}(0) = +1
+```
 
-- $q_p = \cos(\theta/2)$ is the scalar part of the tilt quaternion, where $\theta$ is the tilt angle of the thrust axis from vertical. $q_x$ and $q_y$ give the tilt axis. $q_p > 0$ as long as the vehicle is not upside down, so $q_{xy}$ is continuous.
-- $q_w$ and $q_z$ are the cosine and sine of half the heading angle. The heading angle is $\varphi = 2\arcsin q_z$.
-- Choosing $q_p \ge 0$ and $q_w \ge 0$ removes the sign ambiguity of quaternions. The controller therefore always turns through the shortest angle, which avoids the *unwinding* phenomenon.
+- $`q_p = \cos(\theta/2)`$ is the scalar part of the tilt quaternion, where $`\theta`$ is the tilt angle of the thrust axis from vertical. $`q_x`$ and $`q_y`$ give the tilt axis. $`q_p > 0`$ as long as the vehicle is not upside down, so $`q_{xy}`$ is continuous.
+- $`q_w`$ and $`q_z`$ are the cosine and sine of half the heading angle. The heading angle is $`\varphi = 2\arcsin q_z`$.
+- Choosing $`q_p \ge 0`$ and $`q_w \ge 0`$ removes the sign ambiguity of quaternions. The controller therefore always turns through the shortest angle, which avoids the *unwinding* phenomenon.
 
 ### 4.3 Thrust vector and heading kinematics
 
-Because the thrust acts along the body z-axis, which is also the z-axis of the A-frame, the thrust vector depends only on $q_{xy}$. In the paper's NED frame:
+Because the thrust acts along the body z-axis, which is also the z-axis of the A-frame, the thrust vector depends only on $`q_{xy}`$. In the paper's NED frame:
 
-$$
-\mathbf T = R(q_{xy})\begin{bmatrix}0\\0\\-T\end{bmatrix} = \begin{bmatrix} -2q_y q_p\\ 2q_x q_p \\ 1 - 2q_p^2\end{bmatrix} T \qquad (15)
-$$
+```math
+\mathbf T = R(q_{xy})\begin{bmatrix}0\\0\\-T\end{bmatrix} = \begin{bmatrix} -2q_y q_p\\ 2q_x q_p \\ 1 - 2q_p^2\end{bmatrix} T
+```
 
-Here $T$ is the thrust magnitude. Its time derivative depends only on the tilt rates $\omega_{xy} = [\omega_x\ \omega_y]^\top$ and the thrust rate $\dot T$:
+Here $`T`$ is the thrust magnitude. Its time derivative depends only on the tilt rates $`\omega_{xy} = [\omega_x\ \omega_y]^\top`$ and the thrust rate $`\dot T`$:
 
-$$
-\dot{\mathbf T} = M(q_{xy})\,D(T)\,R_s(q_z)\begin{bmatrix}\omega_{xy}\\ \dot T\end{bmatrix}, \qquad D(T) = \operatorname{diag}(T, T, 1) \qquad (27)
-$$
+```math
+\dot{\mathbf T} = M(q_{xy})\,D(T)\,R_s(q_z)\begin{bmatrix}\omega_{xy}\\ \dot T\end{bmatrix}, \qquad D(T) = \mathrm{diag}(T, T, 1)
+```
 
-$M(q_{xy})$ is orthogonal ($M^{-1} = M^\top$), and $R_s(q_z)$ rotates $\omega_{xy}$ from the B-frame into the A-frame (eq. 22). The yaw rate $\omega_z$ does not appear, so it cannot disturb the position. The heading angle obeys
+$`M(q_{xy})`$ is orthogonal ($`M^{-1} = M^\top`$), and $`R_s(q_z)`$ rotates $`\omega_{xy}`$ from the B-frame into the A-frame. The yaw rate $`\omega_z`$ does not appear, so it cannot disturb the position. The heading angle obeys
 
-$$
-\dot\varphi = \omega_z - l(q_{xy})^\top R_s(q_z)\,\omega_{xy}, \qquad l(q_{xy}) = \tfrac{1}{q_p}[\,q_y\ \ -q_x\,]^\top \qquad (24)
-$$
+```math
+\dot\varphi = \omega_z - l(q_{xy})^\top R_s(q_z)\,\omega_{xy}, \qquad l(q_{xy}) = \tfrac{1}{q_p}[\,q_y\ \ -q_x\,]^\top
+```
 
 This equation is verified numerically against finite differences in the tests.
 
@@ -203,143 +203,143 @@ This equation is verified numerically against finite differences in the tests.
 
 The quadrotor is a rigid body. The motor dynamics are fast compared with the vehicle, so, as in the paper, the total thrust and the three body torques are the plant inputs.
 
-$$
-\dot x = v \qquad (25), \qquad\qquad \dot v = f(v) + g + \tfrac{1}{m}\mathbf T \qquad (26)
-$$
+```math
+\dot x = v, \qquad \dot v = f(v) + g + \tfrac{1}{m}\mathbf T
+```
 
-$$
-\dot\omega = J^{-1}\big(J\omega\times\omega + \tau\big) \qquad (28)
-$$
+```math
+\dot\omega = J^{-1}\big(J\omega\times\omega + \tau\big)
+```
 
-- **Drag:** $f(v)$ models drag. Here it is linear, $f(v) = -c\,v$; the paper's experiments and the default setting use $c = 0$.
-- **Input transformation:** $\tau = -J\omega\times\omega + J\tilde\tau$ (29) cancels the gyroscopic term and gives direct access to the angular acceleration, $\dot\omega = \tilde\tau$ (30).
-- **Dynamic thrust extension:** two integrators are added for the thrust magnitude, $\ddot T = u_T$ (31). The thrust becomes a state, its command is smooth, and $\dot T$ and $\ddot T$ are available to the design.
+- **Drag:** $`f(v)`$ models drag. Here it is linear, $`f(v) = -c\,v`$; the paper's experiments and the default setting use $`c = 0`$.
+- **Input transformation:** $`\tau = -J\omega\times\omega + J\tilde\tau`$ cancels the gyroscopic term and gives direct access to the angular acceleration, $`\dot\omega = \tilde\tau`$.
+- **Dynamic thrust extension:** two integrators are added for the thrust magnitude, $`\ddot T = u_T`$. The thrust becomes a state, its command is smooth, and $`\dot T`$ and $`\ddot T`$ are available to the design.
 
-The plant inputs used by the design are therefore $\tilde\tau_{xy}$, $u_T$ (position) and $\tilde\tau_z$ (heading).
+The plant inputs used by the design are therefore $`\tilde\tau_{xy}`$, $`u_T`$ (position) and $`\tilde\tau_z`$ (heading).
 
-### 4.5 Backstepping position control (paper Sec. III-A, eqs. 32–46)
+### 4.5 Backstepping position control
 
 Each step defines an error, chooses a virtual control that makes the derivative of the Lyapunov function negative, and passes the remaining coupling term to the next step:
 
 | Step | Error | Virtual / real control | Lyapunov function |
 |---|---|---|---|
-| 1 Position | $z_x = x - x_T$ | $v_d = \dot x_T + A_x z_x$ (33) | $V_x = \tfrac12 z_x^\top z_x$ (32) |
-| 2 Velocity | $z_v = v - v_d$ | $\mathbf T_d = m\big(-f - g + \dot v_d - z_x + A_v z_v\big)$ (37) | $V_v = V_x + \tfrac12 z_v^\top z_v$ (35) |
-| 3 Thrust vector | $z_t = \mathbf T - \mathbf T_d$ | $\begin{bmatrix}\omega_{xyd}\\ \dot T_d\end{bmatrix} = R_s^\top D^{-1} M^\top\big(\dot{\mathbf T}_d + A_t z_t - \tfrac1m z_v\big)$ (41) | $V_t = V_v + \tfrac12 z_t^\top z_t$ (39) |
-| 4 Rates | $z_r = \begin{bmatrix}\omega_{xy}-\omega_{xyd}\\ \dot T-\dot T_d\end{bmatrix}$ | $\begin{bmatrix}\tilde\tau_{xy}\\ u_T\end{bmatrix} = \begin{bmatrix}\dot\omega_{xyd}\\ \ddot T_d\end{bmatrix} + A_r z_r - R_s^\top D M^\top z_t$ (45) | $V_\omega = V_t + \tfrac12 z_r^\top z_r$ (43) |
+| 1 Position | $`z_x = x - x_T`$ | $`v_d = \dot x_T + A_x z_x`$ | $`V_x = \tfrac12 z_x^\top z_x`$ |
+| 2 Velocity | $`z_v = v - v_d`$ | $`\mathbf T_d = m\big(-f - g + \dot v_d - z_x + A_v z_v\big)`$ | $`V_v = V_x + \tfrac12 z_v^\top z_v`$ |
+| 3 Thrust vector | $`z_t = \mathbf T - \mathbf T_d`$ | $`\begin{bmatrix}\omega_{xyd}\\ \dot T_d\end{bmatrix} = R_s^\top D^{-1} M^\top\big(\dot{\mathbf T}_d + A_t z_t - \tfrac1m z_v\big)`$ | $`V_t = V_v + \tfrac12 z_t^\top z_t`$ |
+| 4 Rates | $`z_r = \begin{bmatrix}\omega_{xy}-\omega_{xyd}\\ \dot T-\dot T_d\end{bmatrix}`$ | $`\begin{bmatrix}\tilde\tau_{xy}\\ u_T\end{bmatrix} = \begin{bmatrix}\dot\omega_{xyd}\\ \ddot T_d\end{bmatrix} + A_r z_r - R_s^\top D M^\top z_t`$ | $`V_\omega = V_t + \tfrac12 z_r^\top z_r`$ |
 
-With $A_x, A_v, A_t, A_r < 0$ all cross terms cancel and
+With $`A_x, A_v, A_t, A_r < 0`$ all cross terms cancel and
 
-$$
-\dot V_\omega = z_x^\top A_x z_x + z_v^\top A_v z_v + z_t^\top A_t z_t + z_r^\top A_r z_r \;\le\; 0 \qquad (46)
-$$
+```math
+\dot V_\omega = z_x^\top A_x z_x + z_v^\top A_v z_v + z_t^\top A_t z_t + z_r^\top A_r z_r \;\le\; 0
+```
 
 so all errors converge to zero asymptotically.
 
-- **Reference smoothness:** the law needs the reference position and its derivatives up to the 4th order ($x_T \in C^4$).
-- **Analytic derivatives:** every derivative of a virtual control ($\dot{\mathbf T}_d$, $\ddot T_d$, $\dot\omega_{xyd}$) is computed analytically from the model. Nothing is differentiated numerically.
-- **Thrust error:** $z_t^\top z_t = \tilde T^2 + 2T_d(\tilde T + T_d)(1-\cos\alpha_e)$, where $\tilde T$ is the magnitude error and $\alpha_e$ the angle between $\mathbf T$ and $\mathbf T_d$. The design therefore removes the magnitude error and rotates the thrust vector the short way.
+- **Reference smoothness:** the law needs the reference position and its derivatives up to the 4th order ($`x_T \in C^4`$).
+- **Analytic derivatives:** every derivative of a virtual control ($`\dot{\mathbf T}_d`$, $`\ddot T_d`$, $`\dot\omega_{xyd}`$) is computed analytically from the model. Nothing is differentiated numerically.
+- **Thrust error:** $`z_t^\top z_t = \tilde T^2 + 2T_d(\tilde T + T_d)(1-\cos\alpha_e)`$, where $`\tilde T`$ is the magnitude error and $`\alpha_e`$ the angle between $`\mathbf T`$ and $`\mathbf T_d`$. The design therefore removes the magnitude error and rotates the thrust vector the short way.
 
 Implementation notes:
 
-- $z_t$ is normalised by the mass, $z_t = (\mathbf T - \mathbf T_d)/m$. For $m = 1$ kg this is exactly the paper's law. For other masses it is the same design with the Lyapunov weight $1/m^2$, which lets the same gains fly the 1.5 kg model and the 27 g Crazyflie.
-- $M D R_s$ is evaluated in its equivalent vector form, $\dot{\mathbf T} = R(q)\,[\,T\omega_y,\ -T\omega_x,\ \dot T\,]^\top$ (FLU).
-- Thrust limits are $0.15\,mg \le T \le 2.5\,mg$; for the Crazyflie the upper limit is 90 % of $4k_f\,\mathrm{RPM}_{max}^2$.
+- $`z_t`$ is normalised by the mass, $`z_t = (\mathbf T - \mathbf T_d)/m`$. For $`m = 1`$ kg this is exactly the paper's law. For other masses it is the same design with the Lyapunov weight $`1/m^2`$, which lets the same gains fly the 1.5 kg model and the 27 g Crazyflie.
+- $`M D R_s`$ is evaluated in its equivalent vector form, $`\dot{\mathbf T} = R(q)\,[\,T\omega_y,\ -T\omega_x,\ \dot T\,]^\top`$ (FLU).
+- Thrust limits are $`0.15\,mg \le T \le 2.5\,mg`$; for the Crazyflie the upper limit is 90 % of $`4k_f\,\mathrm{RPM}_{max}^2`$.
 
-### 4.6 Heading control (paper Sec. III-B, eqs. 47–54)
+### 4.6 Heading control
 
-With the wrapped heading error $z_\varphi = \operatorname{mod}(\varphi - \varphi_T + \pi,\, 2\pi) - \pi$ and $z_{\omega z} = \omega_z - \omega_{zd}$:
+With the wrapped heading error $`z_\varphi = \mathrm{mod}(\varphi - \varphi_T + \pi,\, 2\pi) - \pi`$ and $`z_{\omega z} = \omega_z - \omega_{zd}`$:
 
-$$
-\omega_{zd} = \dot\varphi_T + a_\varphi z_\varphi + l^\top R_s\,\omega_{xy} \quad (48), \qquad
-\tilde\tau_z = \dot\omega_{zd} + a_{\omega z} z_{\omega z} - z_\varphi \quad (52)
-$$
+```math
+\omega_{zd} = \dot\varphi_T + a_\varphi z_\varphi + l^\top R_s\,\omega_{xy}, \qquad
+\tilde\tau_z = \dot\omega_{zd} + a_{\omega z} z_{\omega z} - z_\varphi
+```
 
-This gives $\dot z_\varphi = a_\varphi z_\varphi + z_{\omega z}$ and $\dot z_{\omega z} = a_{\omega z} z_{\omega z} - z_\varphi$ (53–54). The heading loop is asymptotically stable on its own, independent of the position control. The commanded torque is finally $\tau = -J\omega\times\omega + J\tilde\tau$ (29).
+This gives $`\dot z_\varphi = a_\varphi z_\varphi + z_{\omega z}`$ and $`\dot z_{\omega z} = a_{\omega z} z_{\omega z} - z_\varphi`$. The heading loop is asymptotically stable on its own, independent of the position control. The commanded torque is finally $`\tau = -J\omega\times\omega + J\tilde\tau`$.
 
-### 4.7 Controller gains (paper Sec. IV)
+### 4.7 Controller gains
 
 | Gain (code) | Paper symbol | Value | Acts on |
 |---|---|---:|---|
-| `k_x` | $A_x$ | −1 | position error $z_x$ |
-| `k_v` | $A_v$ | −3 | velocity error $z_v$ |
-| `k_t` | $A_t$ | −8 | thrust-vector error $z_t$ |
-| `k_r` | $A_r$ | −12 | rate error $z_r$ |
-| `k_phi` | $a_\varphi$ | −2 | heading error $z_\varphi$ |
-| `k_wz` | $a_{\omega z}$ | −12 | yaw-rate error $z_{\omega z}$ |
+| `k_x` | $`A_x`$ | −1 | position error $`z_x`$ |
+| `k_v` | $`A_v`$ | −3 | velocity error $`z_v`$ |
+| `k_t` | $`A_t`$ | −8 | thrust-vector error $`z_t`$ |
+| `k_r` | $`A_r`$ | −12 | rate error $`z_r`$ |
+| `k_phi` | $`a_\varphi`$ | −2 | heading error $`z_\varphi`$ |
+| `k_wz` | $`a_{\omega z}`$ | −12 | yaw-rate error $`z_{\omega z}`$ |
 
-The gains are stored as positive numbers $k = -A$ in `config.yaml` → `controller`. The same gains are used in every simulator.
+The gains are stored as positive numbers $`k = -A`$ in `config.yaml` → `controller`. The same gains are used in every simulator.
 
-### 4.8 Reference trajectories ($C^4$ references)
+### 4.8 Reference trajectories ($`C^4`$ references)
 
 Every reference supplies position, velocity, acceleration, jerk and snap, plus heading, heading rate and heading acceleration (`trajectory.py`).
 
-- **Paper helix (Fig. 4):** $x_T = \sin(\omega_{xy}t)$, $y_T = -2\cos(\omega_{xy}t)$, $z_T = 1 + 0.5\sin(\omega_z t)$, $\varphi_T = \sin(\omega_z t)$, with $\omega_{xy} = 2\pi/6.25$ s and $\omega_z = 2\pi/12.5$ s.
-- **Figure-8:** $x_T = 2\sin(\omega t)$, $y_T = \sin(2\omega t)$, $z_T = 1.2 + 0.3\cos(\omega t)$, $\omega = 2\pi/12$ s.
+- **Vertical helix (from the paper):** $`x_T = \sin(\omega_{xy}t)`$, $`y_T = -2\cos(\omega_{xy}t)`$, $`z_T = 1 + 0.5\sin(\omega_z t)`$, $`\varphi_T = \sin(\omega_z t)`$, with $`\omega_{xy} = 2\pi/6.25`$ s and $`\omega_z = 2\pi/12.5`$ s.
+- **Figure-8:** $`x_T = 2\sin(\omega t)`$, $`y_T = \sin(2\omega t)`$, $`z_T = 1.2 + 0.3\cos(\omega t)`$, $`\omega = 2\pi/12`$ s.
 - **Mission:** takeoff → hover → helix (4 periods) → figure-8 (2 periods) → hover, repeating.
   - Every manoeuvre starts and ends at rest.
-  - A time warp $\tau(t)$ with a degree-9 smoothstep speed ramp, differentiated with Faà di Bruno's formula, keeps the reference $C^4$ at every joint.
+  - A time warp $`\tau(t)`$ with a degree-9 smoothstep speed ramp, differentiated with Faà di Bruno's formula, keeps the reference $`C^4`$ at every joint.
   - The speed never exceeds that of the individual trajectories (about 2 m/s).
-- **Set points (paper Fig. 3):** a 5th-order critically damped reference model, $X_T(s)/X_C(s) = 1/(\tau s + 1)^5$ per axis, gives $x_T \in C^4$ from a step command. A 3rd-order model does the same for the heading.
-- **Carrot:** for set points with obstacles, the command $X_C$ is a lead point ("carrot"). It moves along the planned curve (4.12), is steered by the avoider (4.11), and stays within 0.8 m of the reference. The reference model smooths it.
+- **Set points:** a 5th-order critically damped reference model, $`X_T(s)/X_C(s) = 1/(\tau s + 1)^5`$ per axis, gives $`x_T \in C^4`$ from a step command. A 3rd-order model does the same for the heading.
+- **Carrot:** for set points with obstacles, the command $`X_C`$ is a lead point ("carrot"). It moves along the planned curve (4.12), is steered by the avoider (4.11), and stays within 0.8 m of the reference. The reference model smooths it.
 
 ### 4.9 Sensor noise model
 
 The controller never sees the true state. `SensorNoiseModel` adds zero-mean Gaussian white noise to every measurement, independently at every 2 ms step:
 
-$$
+```math
 \tilde p = p + n_p,\quad n_p \sim \mathcal N(0, \sigma_p^2 I), \qquad
 \tilde v = v + n_v,\quad n_v \sim \mathcal N(0, \sigma_v^2 I), \qquad
 \tilde\omega = \omega + n_\omega,\quad n_\omega \sim \mathcal N(0, \sigma_\omega^2 I)
-$$
+```
 
 | Sensor | Std. deviation | Typical source |
 |---|---:|---|
-| position $\sigma_p$ | 5 cm | GPS-RTK / motion capture |
-| velocity $\sigma_v$ | 8 cm/s | GPS velocity / optical flow |
-| gyro $\sigma_\omega$ | 0.02 rad/s | MEMS IMU |
+| position $`\sigma_p`$ | 5 cm | GPS-RTK / motion capture |
+| velocity $`\sigma_v`$ | 8 cm/s | GPS velocity / optical flow |
+| gyro $`\sigma_\omega`$ | 0.02 rad/s | MEMS IMU |
 
-The values are set in `config.yaml` → `noise`; `--no-noise` switches the noise off. With $\sigma_p = 5$ cm per axis, the 3D position error of a raw measurement is about 8.7 cm RMS. A backstepping controller differentiates its errors through several steps, so feeding these measurements in directly makes the torque commands very noisy (see 6.2).
+The values are set in `config.yaml` → `noise`; `--no-noise` switches the noise off. With $`\sigma_p = 5`$ cm per axis, the 3D position error of a raw measurement is about 8.7 cm RMS. A backstepping controller differentiates its errors through several steps, so feeding these measurements in directly makes the torque commands very noisy (see 6.2).
 
 ### 4.10 Kalman filter (state estimation)
 
-`KalmanFilter` estimates the translational state $\hat s = [\,\hat p^\top\ \hat v^\top\,]^\top \in \mathbb R^6$ with a discrete constant-acceleration model, $\Delta t = 2$ ms:
+`KalmanFilter` estimates the translational state $`\hat s = [\,\hat p^\top\ \hat v^\top\,]^\top \in \mathbb R^6`$ with a discrete constant-acceleration model, $`\Delta t = 2`$ ms:
 
-$$
+```math
 s_{k+1} = F s_k + B u_k + w_k, \qquad
 F = \begin{bmatrix} I_3 & \Delta t\, I_3\\ 0 & I_3\end{bmatrix}, \qquad
 B = \begin{bmatrix} \tfrac12\Delta t^2 I_3\\ \Delta t\, I_3\end{bmatrix}
-$$
+```
 
-**Control input.** $u_k$ is the model acceleration predicted by the controller from the commanded thrust:
+**Control input.** $`u_k`$ is the model acceleration predicted by the controller from the commanded thrust:
 
-$$
+```math
 u = g + \tfrac{1}{m}\,R(q)\,e_3\,T + f(v)
-$$
+```
 
 The filter therefore knows where the drone is accelerating and does not lag during manoeuvres. Without this input the estimate lagged by up to 11.5 cm on the helix.
 
-**Process noise.** A white-noise acceleration model with $\sigma_a = 0.3$ m/s² gives, per axis:
+**Process noise.** A white-noise acceleration model with $`\sigma_a = 0.3`$ m/s² gives, per axis:
 
-$$
+```math
 Q = \sigma_a^2 \begin{bmatrix} \Delta t^4/4 & \Delta t^3/2\\ \Delta t^3/2 & \Delta t^2\end{bmatrix}
-$$
+```
 
-**Measurement.** $z_k = [\,\tilde p^\top\ \tilde v^\top\,]^\top = H s_k + n_k$, with $H = I_6$ and $R = \operatorname{diag}(\sigma_p^2 I_3,\ \sigma_v^2 I_3)$.
+**Measurement.** $`z_k = [\,\tilde p^\top\ \tilde v^\top\,]^\top = H s_k + n_k`$, with $`H = I_6`$ and $`R = \mathrm{diag}(\sigma_p^2 I_3,\ \sigma_v^2 I_3)`$.
 
 **Predict and update** (Joseph form for a symmetric, positive-definite covariance):
 
-$$
+```math
 \hat s^- = F\hat s + Bu, \qquad P^- = FPF^\top + Q
-$$
+```
 
-$$
+```math
 K = P^-H^\top(HP^-H^\top + R)^{-1}, \qquad \hat s = \hat s^- + K(z - H\hat s^-), \qquad P = (I-KH)P^-(I-KH)^\top + KRK^\top
-$$
+```
 
-**Gyro filter.** `AngularRateFilter` is a first-order low-pass filter (a steady-state Kalman filter), $\hat\omega_k = \hat\omega_{k-1} + \alpha(\tilde\omega_k - \hat\omega_{k-1})$ with $\alpha = 0.2$ at 500 Hz.
+**Gyro filter.** `AngularRateFilter` is a first-order low-pass filter (a steady-state Kalman filter), $`\hat\omega_k = \hat\omega_{k-1} + \alpha(\tilde\omega_k - \hat\omega_{k-1})`$ with $`\alpha = 0.2`$ at 500 Hz.
 
-**Result.** The controller receives $\hat p$, $\hat v$, $\hat\omega$ and the attitude quaternion. The position error of what the controller sees drops from 8.7 cm (raw) to 0.5 cm (estimate). The torque-command chatter drops by about 80× (Section 6.2).
+**Result.** The controller receives $`\hat p`$, $`\hat v`$, $`\hat\omega`$ and the attitude quaternion. The position error of what the controller sees drops from 8.7 cm (raw) to 0.5 cm (estimate). The torque-command chatter drops by about 80× (Section 6.2).
 
 ### 4.11 Object detection: LiDAR and reactive avoidance
 
@@ -353,21 +353,21 @@ $$
 
 Each scan returns the range to the first hit for every beam (`LidarScan`).
 
-**Detection and repulsion.** A beam $i$ with direction $d_i$ and range $r_i$ below the detection distance $d_{det}$ is an obstacle. Its strength grows as the obstacle gets closer:
+**Detection and repulsion.** A beam $`i`$ with direction $`d_i`$ and range $`r_i`$ below the detection distance $`d_{det}`$ is an obstacle. Its strength grows as the obstacle gets closer:
 
-$$
+```math
 s_i = \left(\frac{d_{det} - \max(r_i,\, \kappa\, d_{safe})}{d_{det} - \kappa\, d_{safe}}\right)^{1.5}, \qquad
 \mathbf r = -\sum_i s_i\, d_i \quad \text{(repulsion away from the obstacles)}
-$$
+```
 
-**Circulation (wall following).** The repulsion is scaled to the avoidance speed. A tangential term $\mathbf c = \pm\,\mathbf r^{\perp}$ is added so the drone slides along the obstacle instead of stopping in front of it. The side (±) is chosen once, in the direction of the desired motion, and kept (*side memory*) until the path has been clear for a while. This removes the classic potential-field local minimum in front of symmetric obstacles.
+**Circulation (wall following).** The repulsion is scaled to the avoidance speed. A tangential term $`\mathbf c = \pm\,\mathbf r^{\perp}`$ is added so the drone slides along the obstacle instead of stopping in front of it. The side (±) is chosen once, in the direction of the desired motion, and kept (*side memory*) until the path has been clear for a while. This removes the classic potential-field local minimum in front of symmetric obstacles.
 
-**Blending.** With the nearest obstacle at distance $r_{min}$, the avoidance velocity $v_{av}$ (repulsion plus circulation) replaces more of the nominal velocity the closer the obstacle is:
+**Blending.** With the nearest obstacle at distance $`r_{min}`$, the avoidance velocity $`v_{av}`$ (repulsion plus circulation) replaces more of the nominal velocity the closer the obstacle is:
 
-$$
-w = \operatorname{clip}\!\left(\frac{d_{det} - r_{min}}{d_{det} - d_{safe}},\,0,\,1\right), \qquad
+```math
+w = \mathrm{clip}\!\left(\frac{d_{det} - r_{min}}{d_{det} - d_{safe}},\,0,\,1\right), \qquad
 v_{cmd} = \max(w_{min},\,1-w)\,v_{nom} + w\,v_{av}
-$$
+```
 
 Further refinements:
 
@@ -375,9 +375,9 @@ Further refinements:
 - The down beam keeps a ground clearance, except while landing.
 - The speed is limited.
 
-In MuJoCo $d_{safe} = 1.0$ m and $d_{det} = 2.0$ m; for the small Crazyflie in PyBullet they are 0.6 m and 1.5 m.
+In MuJoCo $`d_{safe} = 1.0`$ m and $`d_{det} = 2.0`$ m; for the small Crazyflie in PyBullet they are 0.6 m and 1.5 m.
 
-**How it shapes the reference.** For set points, $v_{cmd}$ moves the carrot. For trajectories (helix, figure-8), it builds a smooth, decaying offset (at most 1.5 m) that is added to the reference. Either way, the reference stays continuous.
+**How it shapes the reference.** For set points, $`v_{cmd}`$ moves the carrot. For trajectories (helix, figure-8), it builds a smooth, decaying offset (at most 1.5 m) that is added to the reference. Either way, the reference stays continuous.
 
 ### 4.12 Redirecting the trajectory: global path planner and smooth curve
 
@@ -387,18 +387,18 @@ The LiDAR only sees a few metres. Big buildings, courtyards and targets placed i
 2. **Straight line.** If the 3D segment from the drone to the target is free (slab test against all inflated boxes), the drone flies straight.
 3. **Route at cruise height.** Otherwise the cruise height is the higher of the start and goal heights. The obstacles taller than that height are rasterised into a 0.5 m occupancy grid. A* (8-connected, octile heuristic, no corner cutting) finds the shortest route, and line-of-sight shortening removes unnecessary waypoints.
 4. **Over the top.** If no route exists at that height (the target is inside a closed courtyard), the drone flies over the blocking buildings.
-5. **Smooth curve.** The waypoints form a polyline with sharp corners ("straight up, then across"). Every corner $P_i$ is replaced by a quadratic Bézier curve:
+5. **Smooth curve.** The waypoints form a polyline with sharp corners ("straight up, then across"). Every corner $`P_i`$ is replaced by a quadratic Bézier curve:
 
-$$
+```math
 B(u) = (1-u)^2 A_i + 2u(1-u)P_i + u^2 C_i, \qquad
 A_i = P_i - r_i\,\hat e_{in}, \quad C_i = P_i + r_i\,\hat e_{out}, \quad u \in [0, 1]
-$$
+```
 
-The curve is tangent to both legs, so the path is $C^1$ with no corners.
+The curve is tangent to both legs, so the path is $`C^1`$ with no corners.
 
-- **Radius:** $r_i = \min(r_{max},\ \ell_{in}/2,\ \ell_{out}/2)$, with $r_{max} = 10$ m. The first and last legs can be used completely, so takeoff blends straight into the first turn.
+- **Radius:** $`r_i = \min(r_{max},\ \ell_{in}/2,\ \ell_{out}/2)`$, with $`r_{max} = 10`$ m. The first and last legs can be used completely, so takeoff blends straight into the first turn.
 - **Collision check:** the curve is sampled every 0.3 m and checked against the map with a 1.0 m clearance. If it is not free, the radii are reduced (×0.5, ×0.25, then 0).
-- **Following the curve:** the carrot runs along the curve samples at the cruise speed and slows down only on the last leg. The 5th-order reference model turns it into a $C^4$ reference for the controller. The LiDAR avoider stays active the whole time.
+- **Following the curve:** the carrot runs along the curve samples at the cruise speed and slows down only on the last leg. The 5th-order reference model turns it into a $`C^4`$ reference for the controller. The LiDAR avoider stays active the whole time.
 
 | Situation | Planner decision |
 |---|---|
@@ -475,7 +475,7 @@ Gazebo's drone model is kinematic: Gazebo renders the pose computed by the 500 H
 |---|---|
 | 3D city | the same generated world; orbit / follow / top camera; buildings solid, see-through or hidden; props and cars toggles |
 | Flight display | drone model, flown path, reference, planned route curve, dashed route preview, target |
-| Live trajectory values | time, mode, position, reference, tracking error, velocity, speed, roll/pitch/yaw, body rates, thrust, torques, KF error, sensor noise, Lyapunov value $V$, LiDAR status, goal, route progress |
+| Live trajectory values | time, mode, position, reference, tracking error, velocity, speed, roll/pitch/yaw, body rates, thrust, torques, KF error, sensor noise, Lyapunov value $`V`$, LiDAR status, goal, route progress |
 | Charts | x, y, z (actual vs reference), tracking error, speed and thrust over the last 60 s, with hover values |
 | Targets | type X, Y, Z and heading, or click the ground (at a chosen height) or a roof (target above it); hovering over the city shows building heights and footprints |
 | Route check | before flying: "Can the drone fly between the buildings?" Answers straight / between buildings (narrowest gap) / around / over the top / target moved; also route length, minimum clearance, highest point and estimated time |
@@ -500,7 +500,7 @@ kf_error_m, noise_m, lyapunov, goal_x_m, goal_y_m, goal_z_m, route_points_left, 
 
 ### 5.6 ArduPilot / MAVLink
 
-`SITLBridge` converts ArduPilot's NED/FRD state to ENU/FLU. It sends the paper controller's body-rate reference $(\omega_{xd}, \omega_{yd}, \omega_{zd})$ and thrust with `SET_ATTITUDE_TARGET`, and ArduPilot's rate loop tracks them.
+`SITLBridge` converts ArduPilot's NED/FRD state to ENU/FLU. It sends the paper controller's body-rate reference $`(\omega_{xd}, \omega_{yd}, \omega_{zd})`$ and thrust with `SET_ATTITUDE_TARGET`, and ArduPilot's rate loop tracks them.
 
 `run_ardupilot_sitl.py` runs the full ground-station sequence:
 
@@ -523,25 +523,25 @@ Rigid-body model (m = 1.5 kg, J = diag(0.03, 0.03, 0.05) kg m²), RK4 at 500 Hz,
 
 | Experiment | Controller | Sensors | RMSE (cm) | Max error (cm) | Heading RMSE (deg) | Max speed (m/s) | Max tilt (deg) | Torque chatter |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| Fig. 3 switched set points | Full 4-step paper law | ideal | 0.01 | 0.04 | 0.00 | 1.46 | 12.8 | 0.32 |
-| Fig. 3 switched set points | Full 4-step paper law | noise + KF | 0.61 | 1.36 | 0.13 | 1.47 | 13.0 | 3.02 |
-| Fig. 3 switched set points | Simplified 2-step (baseline) | ideal | 13.60 | 36.61 | 8.12 | 1.86 | 16.5 | 0.18 |
-| Fig. 4 vertical helix | Full 4-step paper law | ideal | 0.00 | 0.01 | 0.00 | 2.02 | 11.8 | 0.01 |
-| Fig. 4 vertical helix | Full 4-step paper law | noise + KF | 0.65 | 1.29 | 0.05 | 2.02 | 12.0 | 3.01 |
-| Fig. 4 vertical helix | Full 4-step paper law | noise, no filter | 0.59 | 1.18 | 0.03 | - | - | 249.29 |
-| Fig. 4 vertical helix | Simplified 2-step (baseline) | ideal | 20.62 | 27.41 | 6.60 | 2.33 | 13.7 | 0.02 |
+| Switched set points | Full 4-step paper law | ideal | 0.01 | 0.04 | 0.00 | 1.46 | 12.8 | 0.32 |
+| Switched set points | Full 4-step paper law | noise + KF | 0.61 | 1.36 | 0.13 | 1.47 | 13.0 | 3.02 |
+| Switched set points | Simplified 2-step (baseline) | ideal | 13.60 | 36.61 | 8.12 | 1.86 | 16.5 | 0.18 |
+| Vertical helix | Full 4-step paper law | ideal | 0.00 | 0.01 | 0.00 | 2.02 | 11.8 | 0.01 |
+| Vertical helix | Full 4-step paper law | noise + KF | 0.65 | 1.29 | 0.05 | 2.02 | 12.0 | 3.01 |
+| Vertical helix | Full 4-step paper law | noise, no filter | 0.59 | 1.18 | 0.03 | - | - | 249.29 |
+| Vertical helix | Simplified 2-step (baseline) | ideal | 20.62 | 27.41 | 6.60 | 2.33 | 13.7 | 0.02 |
 | Mission (takeoff-helix-fig8) | Full 4-step paper law | noise + KF | 0.64 | 1.34 | 0.04 | 2.03 | 12.4 | 3.00 |
 | Mission (takeoff-helix-fig8) | Simplified 2-step (baseline) | noise + KF | 17.01 | 33.73 | 3.99 | 2.34 | 17.5 | 2.98 |
 
 The torque chatter is the RMS of the torque-command rate, in N m/s. The full table is in [`results_table.md`](results_table.md).
 
-**Vertical helix (paper Fig. 4).** The actual x, y, z and heading lie on top of the reference. Heading follows ±1 rad while the position tracks with zero error, which shows the decoupling.
+**Vertical helix.** The actual x, y, z and heading lie on top of the reference. Heading follows ±1 rad while the position tracks with zero error, which shows the decoupling.
 
-![Paper Fig. 4 helix reproduced](docs/images/paper_helix_fig4.png)
+![Vertical helix reproduced](docs/images/paper_helix_fig4.png)
 
-**Switched set points (paper Fig. 3).** These use the 5th-order reference model.
+**Switched set points.** These use the 5th-order reference model.
 
-![Paper Fig. 3 set points reproduced](docs/images/paper_setpoints_fig3.png)
+![Switched set points reproduced](docs/images/paper_setpoints_fig3.png)
 
 ### 6.2 Sensor noise and Kalman filter
 
@@ -560,7 +560,7 @@ The tracking error itself is about the same with or without the filter, because 
 | Takeoff | 0.52 / 0.92 cm | 2.16 / 7.00 cm (starts 7 cm below the first reference) |
 | Hover | 0.53 / 0.80 cm | 0.53 / 0.80 cm |
 | Transfer | 0.65 / 1.21 cm | 0.64 / 1.07 cm |
-| Helix (Fig. 4) | 0.58 / 1.23 cm | 0.58 / 1.23 cm |
+| Helix | 0.58 / 1.23 cm | 0.58 / 1.23 cm |
 | Figure-8 | 0.70 / 1.34 cm | 0.70 / 1.33 cm |
 
 The same gains fly two vehicles whose masses differ by a factor of 55 with the same accuracy, thanks to the mass-normalised thrust error.
@@ -608,9 +608,9 @@ This is the flight to (−14, −30, 3) in the Gazebo flight core, with the pape
 
 ### 6.7 Key observations
 
-1. **Decoupling works.** The decomposition $q = q_{xy}\circ q_z$ makes position and heading independent: the heading follows ±1 rad during the helix with practically zero error, and position tracking is unaffected.
+1. **Decoupling works.** The decomposition $`q = q_{xy}\circ q_z`$ makes position and heading independent: the heading follows ±1 rad during the helix with practically zero error, and position tracking is unaffected.
 2. **The full law is far more accurate.** The 4-step law, with the dynamic thrust extension and analytic derivatives, is about 20–40× more accurate than a 2-step PD-like simplification.
-3. **Smooth references are required.** The law needs a $C^4$ reference. Blending moving trajectories directly produced speed overshoots (3.1 m/s); rest-to-rest speed ramps and the 5th-order reference model fixed this.
+3. **Smooth references are required.** The law needs a $`C^4`$ reference. Blending moving trajectories directly produced speed overshoots (3.1 m/s); rest-to-rest speed ramps and the 5th-order reference model fixed this.
 4. **The filter protects the actuators.** The Kalman filter mainly protects the motors: the error stays below 1.5 cm either way, but without the filter the torque commands are about 80× rougher. Using the model acceleration as the filter input is essential to avoid lag.
 5. **Map planning plus reactive avoidance is needed.** The reactive LiDAR avoider alone gets stuck at large buildings and cannot reach targets inside blocks. The planner handles the map-level problem, the avoider keeps the safety margin, and corner rounding makes the result one smooth curve.
 6. **The simulators agree.** The same controller and gains give the same accuracy in MuJoCo (1.5 kg), PyBullet (27 g) and the Python core behind Gazebo and the web dashboard.
@@ -621,7 +621,7 @@ This is the flight to (−14, −30, 3) in the Gazebo flight core, with the pape
 
 ```
 quadrotor_controller/            shared by every simulator
-  paper_controller.py   PaperBacksteppingController (eqs. 24-54), heading_from_quaternion
+  paper_controller.py   PaperBacksteppingController, heading_from_quaternion
   trajectory.py         paper helix, figure-8, C^4 mission, 5th-order reference model
   guidance.py           ReferenceManager: commands, mode switching, carrot, avoidance offset, planned route
   kalman_filter.py      SensorNoiseModel, KalmanFilter, AngularRateFilter, QuadrotorStateEstimator
@@ -645,7 +645,7 @@ drone_dashboard.html         web front end: 3D city (three.js), live values, cha
 run_ardupilot_sitl.py        paper controller over MAVLink (pre-flight, flight, landing)
 mock_mavlink_vehicle.py      ArduCopter stand-in for offline tests
 run_gazebo_bridge.py         older WebSocket telemetry page (MAVLink mode)
-track_error.py               paper experiments (Fig. 3, Fig. 4, mission) -> results/
+track_error.py               paper experiments (set points, helix, mission) -> results/
 generate_world.py            writes models/city.xml and models/quadrotor.world
 set_target.py                writes target.txt (read by every runner)
 gazebo_plugin/               udp_pose_plugin.cc (Gazebo model plugin) + build_gazebo_plugin.sh
@@ -721,7 +721,7 @@ Useful options for MuJoCo / PyBullet: `--headless --duration 60`, `--log run.csv
 
 ```powershell
 python set_target.py auto          # takeoff -> hover -> paper helix -> figure-8 (looping)
-python set_target.py spiral        # paper helix (Fig. 4)
+python set_target.py spiral        # paper helix
 python set_target.py figure8       # figure-8
 python set_target.py 12 10 9       # fly to a point (planned, smooth curve)
 python set_target.py 3 -2 2.5 90   # point + heading in degrees
@@ -737,8 +737,8 @@ python set_target.py land          # return to the helipad
 
 | Test file | What it checks |
 |---|---|
-| `test_paper_controller.py` | eq. (24) vs finite differences; hover equilibrium; sub-mm helix tracking; heading ±1 rad; Lyapunov function never increases (eq. 46); drag compensation; thrust limits |
-| `test_trajectory_guidance.py` | helix parameters; derivatives up to snap; $C^4$ mission joints and speed bound; reference model; target parsing; continuous mode switching; avoider side memory |
+| `test_paper_controller.py` | heading kinematics vs finite differences; hover equilibrium; sub-mm helix tracking; heading ±1 rad; Lyapunov function never increases; drag compensation; thrust limits |
+| `test_trajectory_guidance.py` | helix parameters; derivatives up to snap; $`C^4`$ mission joints and speed bound; reference model; target parsing; continuous mode switching; avoider side memory |
 | `test_kalman_filter.py`, `test_obstacle_avoidance.py` | noise model, Kalman filter, gyro filter; LiDAR scan and avoidance behaviour |
 | `test_path_planner.py` | LiDAR ray cast on the city map, collision-free routes, target moved out of a building, flight to (12, 10, 9) without touching anything |
 | `test_mujoco_sim.py`, `test_pybullet_sim.py` | the paper controller flying MuJoCo and the Crazyflie under real dynamics |
@@ -766,7 +766,7 @@ python set_target.py land          # return to the helipad
 
 ## 14. Conclusion
 
-The project implements the complete backstepping trajectory tracking controller of De Monte and Lohmann (2013): the decoupling quaternion parametrization, the dynamic thrust extension, the four-step position design with its Lyapunov proof, and the independent heading control. The paper's Fig. 3 and Fig. 4 experiments are reproduced with sub-centimetre accuracy.
+The project implements the complete backstepping trajectory tracking controller of De Monte and Lohmann (2013): the decoupling quaternion parametrization, the dynamic thrust extension, the four-step position design with its Lyapunov proof, and the independent heading control. The paper's switched set-point and vertical-helix experiments are reproduced with sub-centimetre accuracy.
 
 The controller is extended with:
 

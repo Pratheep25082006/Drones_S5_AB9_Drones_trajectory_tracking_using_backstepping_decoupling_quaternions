@@ -154,8 +154,8 @@ def try_plots(outdir, helix, fig3, noise_runs):
     except ImportError:
         print("  (matplotlib not installed - skipping plots)")
         return
-    for name, a, title in [("helix_fig4.png", helix, "Vertical helix (paper Fig. 4) - full backstepping law"),
-                           ("setpoints_fig3.png", fig3, "Switched set points (paper Fig. 3) - full backstepping law")]:
+    for name, a, title in [("helix_fig4.png", helix, "Vertical helix - full backstepping law"),
+                           ("setpoints_fig3.png", fig3, "Switched set points - full backstepping law")]:
         fig, ax = plt.subplots(4, 1, figsize=cfg("experiments.plots.figsize_tracking"), sharex=True)
         labels = ["x (m)", "y (m)", "z (m)", "heading (rad)"]
         colors = cfg("experiments.plots.colors")
@@ -214,8 +214,8 @@ def main():
     mission = LoopingMission(start=tuple(mis["start"]))
 
     experiments = [
-        ("Fig. 3 switched set points", fig3_fn, fig3_T, tuple(cfg("experiments.fig3.start")), 0.0),
-        ("Fig. 4 vertical helix", helix_fn, f4["duration"], start_helix, helix_skip),
+        ("Switched set points", fig3_fn, fig3_T, tuple(cfg("experiments.fig3.start")), 0.0),
+        ("Vertical helix", helix_fn, f4["duration"], start_helix, helix_skip),
         ("Mission (takeoff-helix-fig8)", mission, mis["duration"], tuple(mis["start"]), 0.0),
     ]
     results = []
@@ -236,18 +236,18 @@ def main():
     a_raw = run(helix_fn, f4["duration"], "paper", True, start_helix, use_filter=False)
     m_raw = metrics(a_raw, helix_skip)
     m_raw["chatter"] = run.last_chatter
-    print(f"{'Fig. 4 vertical helix':30s} {'full paper law':17s} {'raw noise':8s} RMSE {m_raw['rmse'] * CM_PER_M:7.2f} cm  "
+    print(f"{'Vertical helix':30s} {'full paper law':17s} {'raw noise':8s} RMSE {m_raw['rmse'] * CM_PER_M:7.2f} cm  "
           f"max {m_raw['max'] * CM_PER_M:7.2f} cm  yaw {m_raw['yaw_rmse']:6.2f} deg  chatter {m_raw['chatter']:7.2f}")
-    plant_runs = [("ideal sensors", stored[("Fig. 4 vertical helix", "paper", False)]),
+    plant_runs = [("ideal sensors", stored[("Vertical helix", "paper", False)]),
                   ("noise, no filter", a_raw),
-                  ("noise + Kalman filter", stored[("Fig. 4 vertical helix", "paper", True)])]
+                  ("noise + Kalman filter", stored[("Vertical helix", "paper", True)])]
 
     hdr = ["t", "ref_x", "ref_y", "ref_z", "ref_yaw", "x", "y", "z", "yaw", "speed", "tilt_deg", "thrust", "tau_x"]
-    save_csv(os.path.join(outdir, "helix_fig4_paper_law.csv"), stored[("Fig. 4 vertical helix", "paper", False)], hdr)
-    save_csv(os.path.join(outdir, "setpoints_fig3_paper_law.csv"), stored[("Fig. 3 switched set points", "paper", False)], hdr)
+    save_csv(os.path.join(outdir, "helix_fig4_paper_law.csv"), stored[("Vertical helix", "paper", False)], hdr)
+    save_csv(os.path.join(outdir, "setpoints_fig3_paper_law.csv"), stored[("Switched set points", "paper", False)], hdr)
     save_csv(os.path.join(outdir, "mission_paper_law_noise_kf.csv"), stored[("Mission (takeoff-helix-fig8)", "paper", True)], hdr)
-    try_plots(outdir, stored[("Fig. 4 vertical helix", "paper", False)],
-              stored[("Fig. 3 switched set points", "paper", False)], plant_runs)
+    try_plots(outdir, stored[("Vertical helix", "paper", False)],
+              stored[("Switched set points", "paper", False)], plant_runs)
 
     # ---- markdown --------------------------------------------------------
     ref = cfg("experiments.paper_reference")
@@ -271,7 +271,7 @@ def main():
                   f"{'noise + KF' if noise else 'ideal'} | {cell(m['rmse'])} | {cell(m['max'])} | "
                   f"{cell(m['yaw_rmse'], 1)} | {cell(m['vmax'], 1)} | {cell(m['tilt'], 1, '{:.1f}')} | {cell(m['chatter'], 1)} |")
     if m_raw is not None:
-        md.append(f"| Fig. 4 vertical helix | Full 4-step paper law | noise, no filter | {cell(m_raw['rmse'])} | "
+        md.append(f"| Vertical helix | Full 4-step paper law | noise, no filter | {cell(m_raw['rmse'])} | "
                   f"{cell(m_raw['max'])} | {cell(m_raw['yaw_rmse'], 1)} | - | - | {cell(m_raw['chatter'], 1)} |")
     md += ["", f"Helix metrics exclude the first {helix_skip:.2f} s after start, like the paper's plot window.",
            "", "Torque chatter = RMS of d(tau)/dt in N m/s (how jittery the motor commands are); the Kalman",
