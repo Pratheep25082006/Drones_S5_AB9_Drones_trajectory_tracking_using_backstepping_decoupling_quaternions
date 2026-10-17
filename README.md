@@ -379,36 +379,7 @@ In MuJoCo $`d_{safe} = 1.0`$ m and $`d_{det} = 2.0`$ m; for the small Crazyflie 
 
 **How it shapes the reference.** For set points, $`v_{cmd}`$ moves the carrot. For trajectories (helix, figure-8), it builds a smooth, decaying offset (at most 1.5 m) that is added to the reference. Either way, the reference stays continuous.
 
-### 4.12 Redirecting the trajectory: global path planner and smooth curve
 
-The LiDAR only sees a few metres. Big buildings, courtyards and targets placed inside a block need a plan, so every set-point command is first planned on the city map (`path_planner.GridPlanner`), in the same way in every simulator.
-
-1. **Target check.** Each obstacle is inflated by the clearance (1.3 m horizontally, 1.2 m vertically). If the target lies inside an inflated obstacle, it is moved to the nearest free grid point that can be reached from the drone.
-2. **Straight line.** If the 3D segment from the drone to the target is free (slab test against all inflated boxes), the drone flies straight.
-3. **Route at cruise height.** Otherwise the cruise height is the higher of the start and goal heights. The obstacles taller than that height are rasterised into a 0.5 m occupancy grid. A* (8-connected, octile heuristic, no corner cutting) finds the shortest route, and line-of-sight shortening removes unnecessary waypoints.
-4. **Over the top.** If no route exists at that height (the target is inside a closed courtyard), the drone flies over the blocking buildings.
-5. **Smooth curve.** The waypoints form a polyline with sharp corners ("straight up, then across"). Every corner $`P_i`$ is replaced by a quadratic Bézier curve:
-
-```math
-B(u) = (1-u)^2 A_i + 2u(1-u)P_i + u^2 C_i, \qquad
-A_i = P_i - r_i\,\hat e_{in}, \quad C_i = P_i + r_i\,\hat e_{out}, \quad u \in [0, 1]
-```
-
-The curve is tangent to both legs, so the path is $`C^1`$ with no corners.
-
-- **Radius:** $`r_i = \min(r_{max},\ \ell_{in}/2,\ \ell_{out}/2)`$, with $`r_{max} = 10`$ m. The first and last legs can be used completely, so takeoff blends straight into the first turn.
-- **Collision check:** the curve is sampled every 0.3 m and checked against the map with a 1.0 m clearance. If it is not free, the radii are reduced (×0.5, ×0.25, then 0).
-- **Following the curve:** the carrot runs along the curve samples at the cruise speed and slows down only on the last leg. The 5th-order reference model turns it into a $`C^4`$ reference for the controller. The LiDAR avoider stays active the whole time.
-
-| Situation | Planner decision |
-|---|---|
-| target in open space, line clear | straight line |
-| target behind a building | climb or turn along a smooth curve around it |
-| target between buildings | route through the gap if it is wider than 2 × 1.3 m |
-| target inside a building | moved to the nearest reachable free point |
-| target in a closed courtyard | over the top of the buildings, then down |
-
----
 
 ## 5. Simulation
 
