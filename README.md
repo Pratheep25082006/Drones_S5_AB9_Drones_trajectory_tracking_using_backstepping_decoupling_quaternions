@@ -117,12 +117,12 @@ The system is a closed loop of five blocks. Every simulator uses the same blocks
 
 ```mermaid
 flowchart LR
-    T["Target<br/>(set_target.py / web / mode)"] --> P["Global path planner<br/>A* + corner rounding (4.13)"]
-    P --> G["Guidance<br/>carrot + C⁴ reference model (4.9)"]
-    L["LiDAR<br/>10 beams (4.12)"] --> A["Reactive avoider (4.12)"] --> G
-    G -->|"x_T … x_T⁽⁴⁾, φ_T"| C["Paper backstepping controller<br/>(4.4–4.6)"]
+    T["Target<br/>(set_target.py / web / mode)"] --> P["Global path planner<br/>A* + corner rounding (4.12)"]
+    P --> G["Guidance<br/>carrot + C⁴ reference model (4.8)"]
+    L["LiDAR<br/>10 beams (4.11)"] --> A["Reactive avoider (4.11)"] --> G
+    G -->|"x_T … x_T⁽⁴⁾, φ_T"| C["Paper backstepping controller<br/>(4.4–4.7)"]
     C -->|"thrust T, torques τ"| S["Plant: MuJoCo / PyBullet /<br/>Python rigid body → Gazebo, web"]
-    S --> N["Sensors + Gaussian noise (4.10)"] --> K["Kalman filter + gyro filter (4.11)"]
+    S --> N["Sensors + Gaussian noise (4.9)"] --> K["Kalman filter + gyro filter (4.10)"]
     K -->|"estimated p, v, ω"| C
     S --> L
 ```
@@ -257,28 +257,7 @@ With the wrapped heading error $`z_\varphi = \mathrm{mod}(\varphi - \varphi_T + 
 
 This gives $`\dot z_\varphi = a_\varphi z_\varphi + z_{\omega z}`$ and $`\dot z_{\omega z} = a_{\omega z} z_{\omega z} - z_\varphi`$. The heading loop is asymptotically stable on its own, independent of the position control. The commanded torque is finally $`\tau = -J\omega\times\omega + J\tilde\tau`$.
 
-### 4.7 Trajectory followed by the drone
-
-When flying to a target (`set_target.py X Y Z`, or the web dashboard), which is the main mode, the target is passed through a 5th-order reference model, separately for each axis:
-
-```math
-\frac{X_T(s)}{X_C(s)} = \frac{1}{(\tau s + 1)^5}
-```
-
-- $`X_C`$ is the commanded point and $`X_T`$ is the smooth reference the drone follows.
-- A step command comes out as a smooth S-shaped curve. It has no jumps in position, velocity, acceleration, jerk or snap, so the drone starts and stops gently.
-- $`\tau`$ grows with the distance, so the peak speed stays within the limit.
-- The heading uses the same idea with a 3rd-order model.
-
-When buildings are in the way, the planner first builds a route. The waypoints come from A*, and every corner is rounded with a quadratic Bézier curve:
-
-```math
-B(u) = (1-u)^2 A + 2u(1-u)P + u^2 C, \qquad u \in [0,1]
-```
-
-Here $`P`$ is the corner, and $`A`$ and $`C`$ sit on the two legs at distance $`r \le 10`$ m from it. A lead point moves along this curve at a constant speed, and the 5th-order model above smooths it into the final reference.
-
-### 4.8 Controller gains
+### 4.7 Controller gains
 
 | Gain (code) | Paper symbol | Value | Acts on |
 |---|---|---:|---|
@@ -291,7 +270,7 @@ Here $`P`$ is the corner, and $`A`$ and $`C`$ sit on the two legs at distance $`
 
 The gains are stored as positive numbers $`k = -A`$ in `config.yaml` → `controller`. The same gains are used in every simulator.
 
-### 4.9 Reference trajectories ($`C^4`$ references)
+### 4.8 Reference trajectories ($`C^4`$ references)
 
 Every reference supplies position, velocity, acceleration, jerk and snap, plus heading, heading rate and heading acceleration (`trajectory.py`).
 
@@ -302,9 +281,9 @@ Every reference supplies position, velocity, acceleration, jerk and snap, plus h
   - A time warp $`\tau(t)`$ with a degree-9 smoothstep speed ramp, differentiated with Faà di Bruno's formula, keeps the reference $`C^4`$ at every joint.
   - The speed never exceeds that of the individual trajectories (about 2 m/s).
 - **Set points:** a 5th-order critically damped reference model, $`X_T(s)/X_C(s) = 1/(\tau s + 1)^5`$ per axis, gives $`x_T \in C^4`$ from a step command. A 3rd-order model does the same for the heading.
-- **Carrot:** for set points with obstacles, the command $`X_C`$ is a lead point ("carrot"). It moves along the planned curve (4.13), is steered by the avoider (4.12), and stays within 0.8 m of the reference. The reference model smooths it.
+- **Carrot:** for set points with obstacles, the command $`X_C`$ is a lead point ("carrot"). It moves along the planned curve (4.12), is steered by the avoider (4.11), and stays within 0.8 m of the reference. The reference model smooths it.
 
-### 4.10 Sensor noise model
+### 4.9 Sensor noise model
 
 The controller never sees the true state. `SensorNoiseModel` adds zero-mean Gaussian white noise to every measurement, independently at every 2 ms step:
 
@@ -322,7 +301,7 @@ The controller never sees the true state. `SensorNoiseModel` adds zero-mean Gaus
 
 The values are set in `config.yaml` → `noise`; `--no-noise` switches the noise off. With $`\sigma_p = 5`$ cm per axis, the 3D position error of a raw measurement is about 8.7 cm RMS. A backstepping controller differentiates its errors through several steps, so feeding these measurements in directly makes the torque commands very noisy (see 6.2).
 
-### 4.11 Kalman filter (state estimation)
+### 4.10 Kalman filter (state estimation)
 
 `KalmanFilter` estimates the translational state $`\hat s = [\,\hat p^\top\ \hat v^\top\,]^\top \in \mathbb R^6`$ with a discrete constant-acceleration model, $`\Delta t = 2`$ ms:
 
@@ -362,7 +341,7 @@ K = P^-H^\top(HP^-H^\top + R)^{-1}, \qquad \hat s = \hat s^- + K(z - H\hat s^-),
 
 **Result.** The controller receives $`\hat p`$, $`\hat v`$, $`\hat\omega`$ and the attitude quaternion. The position error of what the controller sees drops from 8.7 cm (raw) to 0.5 cm (estimate). The torque-command chatter drops by about 80× (Section 6.2).
 
-### 4.12 Object detection: LiDAR and reactive avoidance
+### 4.11 Object detection: LiDAR and reactive avoidance
 
 **Sensor.** The drone carries a 10-beam LiDAR: 8 horizontal beams 45° apart in the heading frame (forward, forward-left, left, …), plus one beam up and one down, with a range of 8 m.
 
@@ -400,7 +379,7 @@ In MuJoCo $`d_{safe} = 1.0`$ m and $`d_{det} = 2.0`$ m; for the small Crazyflie 
 
 **How it shapes the reference.** For set points, $`v_{cmd}`$ moves the carrot. For trajectories (helix, figure-8), it builds a smooth, decaying offset (at most 1.5 m) that is added to the reference. Either way, the reference stays continuous.
 
-### 4.13 Redirecting the trajectory: global path planner and smooth curve
+### 4.12 Redirecting the trajectory: global path planner and smooth curve
 
 The LiDAR only sees a few metres. Big buildings, courtyards and targets placed inside a block need a plan, so every set-point command is first planned on the city map (`path_planner.GridPlanner`), in the same way in every simulator.
 
