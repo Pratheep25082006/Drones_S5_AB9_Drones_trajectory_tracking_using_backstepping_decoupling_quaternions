@@ -341,10 +341,6 @@ K = P^-H^\top(HP^-H^\top + R)^{-1}, \qquad \hat s = \hat s^- + K(z - H\hat s^-),
 
 **Result.** The controller receives $`\hat p`$, $`\hat v`$, $`\hat\omega`$ and the attitude quaternion. The position error of what the controller sees drops from 8.7 cm (raw) to 0.5 cm (estimate). The torque-command chatter drops by about 80× (Section 6.2).
 
-### 4.11 Object detection: LiDAR and reactive avoidance
-
-**Sensor.** The drone carries a 10-beam LiDAR: 8 horizontal beams 45° apart in the heading frame (forward, forward-left, left, …), plus one beam up and one down, with a range of 8 m.
-
 | Simulator | How the beams are cast |
 |---|---|
 | MuJoCo | `mj_ray` against the city geometry (the target marker is excluded) |
