@@ -127,7 +127,10 @@ The complete method of the paper is in `quadrotor_controller/paper_controller.py
 
 The system is a closed loop of five blocks. Every simulator uses the same blocks; only the "plant" (the simulated drone) changes.
 
+<a name="fig-1"></a>
 ![System loop: target, planner, guidance, backstepping controller, quadrotor, sensors with noise, Kalman filter and LiDAR avoider](docs/images/fig_system_loop.png)
+
+*Figure 1: The closed control loop, run every 2 ms.*
 
 **How one control cycle goes (every $`2\,\mathrm{ms}`$):**
 
@@ -151,6 +154,17 @@ The sections below explain each formula in this loop, in the order the signals f
 q = [\,q_1\ \ q_2\ \ q_3\ \ q_4\,]^\top = \Big[\,a^\top \sin\tfrac{\alpha}{2}\ \ \ \cos\tfrac{\alpha}{2}\,\Big]^\top, \qquad \lVert q\rVert = 1
 ```
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`q_1, q_2, q_3`$ | vector part: the rotation axis scaled by $`\sin(\alpha/2)`$ | – |
+| $`q_4`$ | scalar part: $`\cos(\alpha/2)`$, the "amount" of rotation | – |
+| $`a`$ | unit vector of the rotation axis, $`\lVert a\rVert = 1`$ | – |
+| $`\alpha`$ | rotation angle about $`a`$ | $`\mathrm{rad}`$ |
+
+**Example.** A heading change of $`90^\circ`$ about the vertical axis has $`a = (0,\ 0,\ 1)`$ and $`\alpha = \pi/2`$, so $`q = [\,0\ \ 0\ \ 0.707\ \ 0.707\,]^\top`$. No rotation at all is $`q = [\,0\ \ 0\ \ 0\ \ 1\,]^\top`$.
+
+**See:** [Figure 2](#fig-2): each of the two rotations drawn there is one axis–angle pair $`(a, \alpha)`$.
+
 - $`(q_1, q_2, q_3)`$ point along the rotation axis, scaled by $`\sin(\alpha/2)`$.
 - $`q_4 = \cos(\alpha/2)`$ says how large the rotation is: $`q_4 = 1`$ means no rotation.
 - The length is always $`1`$, so four numbers carry three degrees of freedom.
@@ -166,6 +180,15 @@ Q(q) = \begin{bmatrix} q_4 & -q_3 & q_2 & q_1\\ q_3 & q_4 & -q_1 & q_2\\ -q_2 & 
 
 $`Q(q)\,r`$ is the quaternion product $`q \circ r`$. The equation says: the attitude rate is half of "current attitude $`\circ`$ angular velocity". The simulators integrate this equation every step, and the controller uses it to know how its torque commands will change the attitude.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\dot q`$ | rate of change of the attitude quaternion | $`1/\mathrm{s}`$ |
+| $`\omega = [\,\omega_x\ \ \omega_y\ \ \omega_z\,]^\top`$ | angular velocity in the body frame (what a gyro measures) | $`\mathrm{rad/s}`$ |
+| $`Q(q)`$ | $`4\times 4`$ matrix that performs the quaternion product $`q \circ (\cdot)`$ | – |
+| $`[\,\omega;\ 0\,]`$ | the angular velocity written as a "pure" quaternion (scalar part $`0`$) | $`\mathrm{rad/s}`$ |
+
+**In words.** Over a short time $`\Delta t`$ the drone turns by the small angle $`\omega\,\Delta t`$; the factor $`\tfrac12`$ appears because a quaternion stores *half* angles. Because $`Q(q)`$ is orthogonal, integrating this equation keeps $`\lVert q\rVert = 1`$ (the code re-normalises after every step to remove rounding errors).
+
 > **Conventions in the code.** The code stores quaternions scalar-first, $`q = (w, x, y, z) = (q_4, q_1, q_2, q_3)`$.
 >
 > The world frame is ENU ($`x`$ east, $`y`$ north, $`z`$ up) and the body frame is FLU (forward, left, up), so the thrust acts along $`+z_B`$ and gravity is $`g = (0,\ 0,\ -9.81)\,\mathrm{m/s^2}`$. The paper uses NED with the thrust along $`-z_B`$. After this sign change all equations are identical.
@@ -180,10 +203,24 @@ $`Q(q)\,r`$ is the quaternion product $`q \circ r`$. The equation says: the atti
 q = q_{xy} \circ q_z = Q(q_{xy})\,q_z
 ```
 
+| Symbol | Meaning |
+|---|---|
+| $`q`$ | full attitude of the drone (world frame $`I`$ → body frame $`B`$) |
+| $`q_{xy}`$ | tilt: world frame $`I`$ → auxiliary frame $`A`$ (2 degrees of freedom) |
+| $`q_z`$ | heading: frame $`A`$ → body frame $`B`$, about the thrust axis (1 degree of freedom) |
+| $`\circ`$ | quaternion product: "first $`q_{xy}`$, then $`q_z`$" |
+
+**In words.** Any attitude can be reached by first leaning the thrust axis in the right direction and then spinning about that axis. The first part decides *where the drone accelerates*, the second part only *which way the nose points*.
+
+**See:** [Figure 2](#fig-2): step 1 (left) is $`q_{xy}`$, step 2 (right) is $`q_z`$.
+
 1. $`q_{xy}`$ first tilts the world frame into an auxiliary frame $`A`$ whose $`z`$-axis is the drone's thrust axis.
 2. $`q_z`$ then turns frame $`A`$ about that $`z`$-axis to the actual body frame $`B`$.
 
+<a name="fig-2"></a>
 ![Decoupling parametrization: step 1 tilts the thrust axis by theta about a horizontal axis, step 2 turns the body by the heading angle about the thrust axis](docs/images/fig_quaternion_decomposition.png)
+
+*Figure 2: Decoupling the attitude: tilt $`q_{xy}`$ (left), then heading $`q_z`$ (right).*
 
 | Quaternion | Structure | Meaning | Degrees of freedom |
 |---|---|---|---|
@@ -207,6 +244,10 @@ q_w = \frac{\lvert q_4\rvert}{q_p}, \qquad q_z = \mathrm{sgn}(q_3 q_4)\,\frac{\l
 - **$`q_w, q_z`$:** the cosine and sine of half the heading angle, so the heading is $`\varphi = 2\arcsin q_z`$.
 - **Why the absolute values and the sign function:** $`q`$ and $`-q`$ describe the same attitude. Forcing $`q_p \ge 0`$ and $`q_w \ge 0`$ picks one of the two, so the controller always turns the short way round. Without this, it could rotate almost a full turn to reach an attitude it was already close to (the *unwinding* phenomenon [4]).
 
+**Example.** For the pure $`90^\circ`$ heading quaternion $`q = [\,0\ \ 0\ \ 0.707\ \ 0.707\,]^\top`$ the formulas give $`q_p = 1`$, $`q_x = q_y = 0`$ (no tilt) and $`q_w = q_z = 0.707`$, so $`\varphi = 2\arcsin(0.707) = 90^\circ`$: the decomposition puts the whole rotation into the heading part, as it should.
+
+**See:** [Figure 2](#fig-2): $`q_p = \cos(\theta/2)`$ belongs to the tilt angle $`\theta`$ drawn on the left, $`q_z = \sin(\varphi/2)`$ to the heading angle drawn on the right.
+
 **Why this matters.** Position control needs only $`q_{xy}`$ (two numbers) and heading control needs only $`q_z`$ (one number). The two controllers can be designed separately.
 
 ---
@@ -221,11 +262,35 @@ q_w = \frac{\lvert q_4\rvert}{q_p}, \qquad q_z = \mathrm{sgn}(q_3 q_4)\,\frac{\l
 
 Reading it: when the drone is level ($`q_x = q_y = 0`$, $`q_p = 1`$) the vector is $`(0,\ 0,\ -T)`$, straight up against gravity in NED. Tilting ($`q_x \ne 0`$ or $`q_y \ne 0`$) gives the horizontal components that accelerate the drone sideways.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\mathbf T`$ | thrust vector in the world frame (paper: NED) | $`\mathrm{N}`$ |
+| $`T`$ | thrust magnitude, the sum of the four rotor forces | $`\mathrm{N}`$ |
+| $`R(q_{xy})`$ | rotation matrix of the tilt quaternion | – |
+| $`q_x, q_y, q_p`$ | components of the tilt quaternion (section 4.2) | – |
+
+**In words.** With $`q_p = \cos(\theta/2)`$ and $`\sqrt{q_x^2 + q_y^2} = \sin(\theta/2)`$, the horizontal part has magnitude $`2 q_p \sin(\theta/2)\,T = T\sin\theta`$ and the vertical part is $`(1 - 2q_p^2)\,T = -T\cos\theta`$. So the formula is simply "a thrust of size $`T`$, tilted by $`\theta`$".
+
+**Example.** The $`1.5\,\mathrm{kg}`$ drone hovers with $`T = mg = 14.7\,\mathrm{N}`$. Tilted by $`\theta = 10^\circ`$, it gets $`14.7 \sin 10^\circ = 2.55\,\mathrm{N}`$ sideways, a horizontal acceleration of $`1.7\,\mathrm{m/s^2}`$, and loses only $`1.5\,\%`$ of its lift.
+
+**See:** [Figure 2](#fig-2) (the orange thrust arrow along the tilted axis) and [Figure 3](#fig-3) (the thrust vector is the third link of the chain).
+
 **How the thrust vector changes.** The controller cannot set $`\mathbf T`$ directly; it can only change the tilt rates $`\omega_{xy} = [\omega_x\ \ \omega_y]^\top`$ and the thrust rate $`\dot T`$. Differentiating $`\mathbf T`$ and using the quaternion kinematics gives:
 
 ```math
 \dot{\mathbf T} = M(q_{xy})\,D(T)\,R_s(q_z)\begin{bmatrix}\omega_{xy}\\ \dot T\end{bmatrix}, \qquad D(T) = \mathrm{diag}(T,\ T,\ 1)
 ```
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\dot{\mathbf T}`$ | rate of change of the thrust vector | $`\mathrm{N/s}`$ |
+| $`\omega_{xy} = [\,\omega_x\ \ \omega_y\,]^\top`$ | roll and pitch rates in the body frame | $`\mathrm{rad/s}`$ |
+| $`\dot T`$ | rate of change of the thrust magnitude | $`\mathrm{N/s}`$ |
+| $`R_s(q_z)`$ | $`2\times 2`$ rotation by the heading angle | – |
+| $`D(T)`$ | scaling: rotating a thrust of size $`T`$ moves its tip $`T`$ times faster | – |
+| $`M(q_{xy})`$ | orthogonal $`3\times 3`$ matrix from frame $`A`$ to the world frame | – |
+
+**See:** [Figure 3](#fig-3): this is the link "rates → thrust vector" of the chain.
 
 - $`R_s(q_z)`$ is the $`2\times 2`$ rotation by the heading. It turns the measured body rates $`\omega_{xy}`$ into frame $`A`$, where the tilt happens.
 - $`D(T)`$ scales them by $`T`$: tilting a strong thrust changes the vector more than tilting a weak one.
@@ -239,6 +304,16 @@ Reading it: when the drone is level ($`q_x = q_y = 0`$, $`q_p = 1`$) the vector 
 ```
 
 When the drone is level, $`l = 0`$ and simply $`\dot\varphi = \omega_z`$. The second term is known exactly, so the heading controller cancels it. This equation is checked against finite differences in the tests.
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\dot\varphi`$ | rate of change of the heading angle | $`\mathrm{rad/s}`$ |
+| $`\omega_z`$ | yaw rate about the drone's own vertical axis | $`\mathrm{rad/s}`$ |
+| $`l(q_{xy})`$ | coupling vector, zero when the drone is level | – |
+
+**In words.** The heading mostly changes with the yaw rate. When the drone is already tilted, a roll or pitch rate also turns the projection of the nose a little; the term $`l^\top R_s\,\omega_{xy}`$ is exactly this effect.
+
+**See:** [Figure 14](#fig-14), heading panel: the heading follows $`\varphi_T = \sin(\omega_z t)`$ while the drone is tilted on the helix.
 
 ---
 
@@ -254,6 +329,19 @@ The drone is modelled as a rigid body. The motors react much faster than the veh
 
 The position $`x`$ changes with the velocity $`v`$. The acceleration is the sum of drag $`f(v)`$, gravity $`g`$ and the thrust vector divided by the mass $`m`$. Drag is linear here, $`f(v) = -c\,v`$, with $`c = 0`$ by default as in the paper's experiments.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`x`$ | position of the centre of mass (world frame) | $`\mathrm{m}`$ |
+| $`v`$ | velocity | $`\mathrm{m/s}`$ |
+| $`f(v)`$ | aerodynamic drag acceleration, $`-c\,v`$ | $`\mathrm{m/s^2}`$ |
+| $`g`$ | gravity vector, $`9.81\,\mathrm{m/s^2}`$ downward | $`\mathrm{m/s^2}`$ |
+| $`m`$ | mass ($`1.5\,\mathrm{kg}`$; Crazyflie $`0.027\,\mathrm{kg}`$) | $`\mathrm{kg}`$ |
+| $`\mathbf T`$ | thrust vector from 4.3 | $`\mathrm{N}`$ |
+
+**In words.** This is Newton's second law, $`m\,a = \sum F`$, divided by $`m`$. The only force the controller can shape is $`\mathbf T`$; to hover, $`\mathbf T`$ must exactly cancel $`m\,g`$.
+
+**See:** [Figure 3](#fig-3): the links "thrust vector → velocity → position" are these two equations.
+
 **Rotational motion (Euler's equation):**
 
 ```math
@@ -261,6 +349,16 @@ The position $`x`$ changes with the velocity $`v`$. The acceleration is the sum 
 ```
 
 The angular acceleration comes from the torques $`\tau`$, plus the gyroscopic term $`J\omega\times\omega`$ that appears when a body with inertia $`J`$ spins about more than one axis.
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\omega`$ | body angular velocity | $`\mathrm{rad/s}`$ |
+| $`\dot\omega`$ | body angular acceleration | $`\mathrm{rad/s^2}`$ |
+| $`J`$ | $`3\times 3`$ inertia matrix (diagonal for the symmetric quadrotor) | $`\mathrm{kg\,m^2}`$ |
+| $`\tau`$ | body torques produced by the rotor speed differences | $`\mathrm{N\,m}`$ |
+| $`\times`$ | vector cross product | – |
+
+**In words.** This is the rotational version of Newton's law, $`J\dot\omega = \sum\text{torques}`$. The extra term $`J\omega\times\omega`$ is zero when the drone spins about a single principal axis and appears only for combined rotations.
 
 **Two modelling steps make the design possible:**
 
@@ -272,6 +370,13 @@ The angular acceleration comes from the torques $`\tau`$, plus the gyroscopic te
 
 Substituting this $`\tau`$ into Euler's equation cancels the gyroscopic term, so the rotation becomes a simple double integrator.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\tilde\tau`$ | new input: the *desired* angular acceleration | $`\mathrm{rad/s^2}`$ |
+| $`\tau`$ | real torque sent to the motors (mixer) | $`\mathrm{N\,m}`$ |
+
+**See:** [Figure 3](#fig-3): after this step the first link "inputs → rates" is a plain integrator.
+
 **(2) Dynamic thrust extension.** Two integrators are added in front of the thrust: $`\ddot T = u_T`$. The new input $`u_T`$ sets the thrust's acceleration, so $`T`$ and $`\dot T`$ become smooth states the design can use, and the motor command has no jumps.
 
 After these steps the design inputs are $`\tilde\tau_{xy}`$ and $`u_T`$ for the position, and $`\tilde\tau_z`$ for the heading.
@@ -282,7 +387,10 @@ After these steps the design inputs are $`\tilde\tau_{xy}`$ and $`u_T`$ for the 
 
 **The chain to control.** The position is not driven directly. The input acts at the end of a chain of four links:
 
+<a name="fig-3"></a>
 ![Backstepping cascade: inputs drive rates, rates drive the thrust vector, the thrust vector drives velocity, velocity drives position; the design walks from position to inputs in four steps](docs/images/fig_backstepping_cascade.png)
+
+*Figure 3: The chain from the inputs to the position, and the four backstepping steps that walk it backwards.*
 
 **The method [3].** Backstepping walks along this chain from the position to the input. At each step it:
 
@@ -301,6 +409,17 @@ v_d = \dot x_T + A_x z_x
 
 then $`\dot V_x = z_x^\top A_x z_x \le 0`$: follow the reference velocity, plus a correction pointing back toward the reference. But $`v`$ is not an input, so the remaining velocity error $`z_v = v - v_d`$ leaves $`\dot V_x = z_x^\top A_x z_x + z_x^\top z_v`$.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`x_T,\ \dot x_T`$ | reference position and velocity (section 4.7) | $`\mathrm{m},\ \mathrm{m/s}`$ |
+| $`z_x`$ | position error | $`\mathrm{m}`$ |
+| $`v_d`$ | desired velocity ("virtual control" of step 1) | $`\mathrm{m/s}`$ |
+| $`A_x`$ | position gain, $`-1\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+
+**Example.** With $`A_x = -1\,\mathrm{s^{-1}}`$, a drone $`10\,\mathrm{cm}`$ to the right of the reference is asked to move $`10\,\mathrm{cm/s}`$ to the left, on top of the reference velocity. The error then decays like $`e^{-t}`$.
+
+**See:** [Figure 3](#fig-3), Step 1.
+
 **Step 2: velocity.** $`V_v = V_x + \tfrac12 z_v^\top z_v`$. Using $`\dot v = f + g + \mathbf T/m`$, the thrust vector that makes $`\dot V_v`$ negative is
 
 ```math
@@ -308,6 +427,17 @@ then $`\dot V_x = z_x^\top A_x z_x \le 0`$: follow the reference velocity, plus 
 ```
 
 Reading it from left to right: cancel drag and gravity, add the desired acceleration $`\dot v_d`$, cancel the cross term $`z_x^\top z_v`$ left over from step 1 (that is the $`-z_x`$), and add a correction $`A_v z_v`$. The remaining thrust error $`z_t = \mathbf T - \mathbf T_d`$ leaves $`\dot V_v = z_x^\top A_x z_x + z_v^\top A_v z_v + \tfrac1m z_v^\top z_t`$.
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\mathbf T_d`$ | desired thrust vector (virtual control of step 2) | $`\mathrm{N}`$ |
+| $`\dot v_d`$ | derivative of $`v_d`$; contains the reference acceleration $`\ddot x_T`$ | $`\mathrm{m/s^2}`$ |
+| $`z_v`$ | velocity error $`v - v_d`$ | $`\mathrm{m/s}`$ |
+| $`A_v`$ | velocity gain, $`-3\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+
+**Example.** Hovering exactly on the reference ($`z_x = z_v = 0`$, $`\dot v_d = 0`$, no drag) gives $`\mathbf T_d = -m\,g`$: a thrust of $`14.7\,\mathrm{N}`$ pointing straight up.
+
+**See:** [Figure 3](#fig-3), Step 2.
 
 **Step 3: thrust vector.** $`V_t = V_v + \tfrac12 z_t^\top z_t`$. The thrust vector changes through $`\dot{\mathbf T} = M D R_s\,[\,\omega_{xy};\ \dot T\,]`$. Choosing the desired rates
 
@@ -317,6 +447,16 @@ Reading it from left to right: cancel drag and gravity, add the desired accelera
 
 inverts this map (that is why $`M`$ being orthogonal and $`D`$ being diagonal matter) and makes the thrust vector follow $`\mathbf T_d`$, again cancelling the previous cross term. $`D^{-1}`$ needs $`T \gt 0`$, which the references and limits guarantee. The remaining rate error is $`z_r = [\,\omega_{xy}-\omega_{xyd};\ \dot T-\dot T_d\,]`$.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\omega_{xyd},\ \dot T_d`$ | desired roll/pitch rates and thrust rate (virtual control of step 3) | $`\mathrm{rad/s},\ \mathrm{N/s}`$ |
+| $`\dot{\mathbf T}_d`$ | derivative of $`\mathbf T_d`$; contains the reference jerk $`x_T^{(3)}`$ | $`\mathrm{N/s}`$ |
+| $`z_t`$ | thrust-vector error $`\mathbf T - \mathbf T_d`$ | $`\mathrm{N}`$ |
+| $`A_t`$ | thrust-vector gain, $`-8\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+| $`R_s^\top D^{-1} M^\top`$ | inverse of the map $`M D R_s`$ from 4.3 | – |
+
+**See:** [Figure 3](#fig-3), Step 3.
+
 **Step 4: rates (the real inputs).** $`V_\omega = V_t + \tfrac12 z_r^\top z_r`$. Now the inputs appear, because $`\dot\omega_{xy} = \tilde\tau_{xy}`$ and $`\ddot T = u_T`$:
 
 ```math
@@ -324,6 +464,16 @@ inverts this map (that is why $`M`$ being orthogonal and $`D`$ being diagonal ma
 ```
 
 follow the desired rates' derivatives, correct the rate error, and cancel the last cross term.
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\tilde\tau_{xy}`$ | roll/pitch angular acceleration command (real input) | $`\mathrm{rad/s^2}`$ |
+| $`u_T`$ | thrust acceleration command, $`\ddot T`$ (real input) | $`\mathrm{N/s^2}`$ |
+| $`\dot\omega_{xyd},\ \ddot T_d`$ | derivatives of the step-3 commands; contain the reference snap $`x_T^{(4)}`$ | $`\mathrm{rad/s^2},\ \mathrm{N/s^2}`$ |
+| $`z_r`$ | rate error from step 3 | – |
+| $`A_r`$ | rate gain, $`-12\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+
+**See:** [Figure 3](#fig-3), Step 4: the design has reached the inputs.
 
 | Step | Error | Virtual / real control | Lyapunov function |
 |---|---|---|---|
@@ -339,6 +489,10 @@ follow the desired rates' derivatives, correct the rate error, and cancel the la
 ```
 
 $`V_\omega`$ is zero only when all four errors are zero, and it can only decrease. So every error goes to zero: the drone converges to the reference trajectory.
+
+**In words.** $`V_\omega`$ is like the total "error energy" of the drone. Each term $`z^\top A z`$ is a negative number (the gains are negative) unless that error is zero, so the energy can only drain away, and the drone settles on the reference.
+
+**See:** [Figure 13](#fig-13) and [Figure 14](#fig-14): with all four steps the error stays below $`1\,\mathrm{cm}`$; the simplified 2-step law, which leaves cross terms uncancelled, is $`20\text{–}40`$ times worse.
 
 **What the law needs, and practical notes:**
 
@@ -363,17 +517,41 @@ z_\varphi = \mathrm{mod}(\varphi - \varphi_T + \pi,\ 2\pi) - \pi
 
 With $`V_\varphi = \tfrac12 z_\varphi^2`$ and the heading kinematics $`\dot\varphi = \omega_z - l^\top R_s\,\omega_{xy}`$, the desired yaw rate is
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\varphi`$ | current heading (yaw) angle | $`\mathrm{rad}`$ |
+| $`\varphi_T`$ | reference heading | $`\mathrm{rad}`$ |
+| $`z_\varphi`$ | heading error, always in $`(-\pi,\ \pi]`$ | $`\mathrm{rad}`$ |
+
+**Example.** $`\varphi = 170^\circ`$ and $`\varphi_T = -170^\circ`$: the raw difference is $`340^\circ`$, but the wrapped error is $`\mathrm{mod}(520^\circ,\ 360^\circ) - 180^\circ = -20^\circ`$, so the drone turns $`20^\circ`$ instead of $`340^\circ`$.
+
+**See:** [Figure 15](#fig-15), heading panel.
+
 ```math
 \omega_{zd} = \dot\varphi_T + a_\varphi z_\varphi + l^\top R_s\,\omega_{xy}
 ```
 
 follow the reference heading rate, correct the error, and cancel the coupling from tilting.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\omega_{zd}`$ | desired yaw rate (virtual control) | $`\mathrm{rad/s}`$ |
+| $`\dot\varphi_T`$ | reference heading rate | $`\mathrm{rad/s}`$ |
+| $`a_\varphi`$ | heading gain, $`-2\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+
 **Step 2: yaw rate.** With $`z_{\omega z} = \omega_z - \omega_{zd}`$ and $`V = V_\varphi + \tfrac12 z_{\omega z}^2`$, the desired yaw angular acceleration is
 
 ```math
 \tilde\tau_z = \dot\omega_{zd} + a_{\omega z} z_{\omega z} - z_\varphi
 ```
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\tilde\tau_z`$ | yaw angular acceleration command (real input) | $`\mathrm{rad/s^2}`$ |
+| $`z_{\omega z}`$ | yaw-rate error $`\omega_z - \omega_{zd}`$ | $`\mathrm{rad/s}`$ |
+| $`a_{\omega z}`$ | yaw-rate gain, $`-12\,\mathrm{s^{-1}}`$ | $`1/\mathrm{s}`$ |
+
+**In words.** Follow the change of the desired yaw rate, correct the yaw-rate error, and cancel the cross term $`z_\varphi z_{\omega z}`$ from step 1 (the $`-z_\varphi`$).
 
 **Resulting error dynamics.** Substituting both laws gives
 
@@ -382,6 +560,10 @@ follow the reference heading rate, correct the error, and cancel the coupling fr
 ```
 
 so the heading error and the yaw-rate error both go to zero, whatever the position controller is doing.
+
+**In words.** The two errors form a damped oscillator with no input from the position loop: the heading converges on its own, which is the practical benefit of the decoupling in 4.2.
+
+**See:** [Figure 14](#fig-14) and [Figure 15](#fig-15), heading panels: the full law follows the heading reference while the position changes at the same time.
 
 **From accelerations to torques.** The position step gives $`\tilde\tau_{xy}`$ and the heading step gives $`\tilde\tau_z`$. Together they form $`\tilde\tau`$, and the input transformation turns it into the real torque command $`\tau = -J\omega\times\omega + J\tilde\tau`$. The thrust magnitude is obtained by integrating $`u_T`$ twice.
 
@@ -397,13 +579,27 @@ so the heading error and the yaw-rate error both go to zero, whatever the positi
 \frac{X_T(s)}{X_C(s)} = \frac{1}{(\tau s + 1)^5}
 ```
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`X_C(s)`$ | commanded target (Laplace transform), one axis | $`\mathrm{m}`$ |
+| $`X_T(s)`$ | smooth reference the controller follows | $`\mathrm{m}`$ |
+| $`\tau`$ | time constant of each of the five filters | $`\mathrm{s}`$ |
+| $`s`$ | Laplace variable | $`1/\mathrm{s}`$ |
+
 - $`X_C`$ is the commanded point and $`X_T`$ is the smooth reference the drone follows. $`s`$ is the Laplace variable.
 - In the time domain it is a chain of five first-order filters: each one smooths the output of the previous one, $`\tau\,\dot y_{k+1} = y_k - y_{k+1}`$, with $`y_0 = X_C`$ and $`y_5 = X_T`$.
 - Each filter in the chain removes one jump, so after five filters position, velocity, acceleration, jerk and snap are all continuous: a step command comes out as a smooth S-shaped curve, and the drone starts and stops gently. All derivatives are read directly from the chain's states.
 - **Speed limit.** For a step of length $`\Delta`$, the reference speed peaks at $`v_{peak} \approx 0.195\,\Delta/\tau`$ (at $`t = 4\tau`$). The time constant is therefore chosen as $`\tau = \max(\tau_{min},\ 0.195\,\Delta / v_{max})`$, with $`\tau_{min} = 0.35\,\mathrm{s}`$ and $`v_{max} = 1.5\,\mathrm{m/s}`$, so long flights never exceed the speed limit.
 - The heading uses the same idea with a 3rd-order model, which gives a heading reference continuous up to its acceleration (what the heading law needs).
 
+**Example.** A $`10\,\mathrm{m}`$ step gives $`\tau = \max(0.35,\ 0.195\cdot 10/1.5) = 1.3\,\mathrm{s}`$. The reference reaches its top speed of $`1.5\,\mathrm{m/s}`$ after $`4\tau = 5.2\,\mathrm{s}`$ and arrives after about $`10\tau = 13\,\mathrm{s}`$.
+
+**See:** [Figure 4](#fig-4) (step response of all five derivatives) and [Figure 15](#fig-15) (the S-shaped set-point responses).
+
+<a name="fig-4"></a>
 ![Step response of the 5th-order reference model: position, velocity, acceleration, jerk and snap all start smoothly from zero](docs/images/fig_reference_model.png)
+
+*Figure 4: Step response of the 5th-order reference model and its derivatives.*
 
 **When buildings are in the way.** The planner (section 4.13) first builds a route. The waypoints come from A\* [10], and every corner is rounded with a quadratic Bézier curve [11]:
 
@@ -414,6 +610,8 @@ B(u) = (1-u)^2 A + 2u(1-u)P + u^2 C, \qquad u \in [0,1]
 - $`P`$ is the corner, and $`A`$ and $`C`$ sit on the incoming and outgoing legs at distance $`r \le 10\,\mathrm{m}`$ from it.
 - At $`u = 0`$ the curve starts at $`A`$ heading along the incoming leg, and at $`u = 1`$ it ends at $`C`$ heading along the outgoing leg. The direction never jumps, so the drone turns smoothly instead of stopping at the corner.
 - A lead point ("carrot") moves along this curve at a constant speed and is fed to the reference model above as $`X_C`$, which smooths it into the final reference.
+
+**See:** [Figure 7](#fig-7) (geometry of one rounded corner) and [Figure 19](#fig-19) (all corners of a planned route).
 
 So the full chain is: **target → planner waypoints → rounded curve → moving carrot → 5th-order reference model → controller.**
 
@@ -438,7 +636,10 @@ The gains increase from the outer loop (position) to the inner loop (rates), so 
 
 Every reference supplies position, velocity, acceleration, jerk and snap, plus heading, heading rate and heading acceleration (`trajectory.py`). Besides the set points of section 4.7 there are three trajectory modes:
 
+<a name="fig-5"></a>
 ![The vertical helix and the figure-8 reference trajectories in 3D](docs/images/fig_trajectories_3d.png)
+
+*Figure 5: The vertical helix and the figure-8 reference trajectories.*
 
 **Vertical helix (from the paper):**
 
@@ -448,6 +649,18 @@ x_T = \sin(\omega_{xy}t), \quad y_T = -2\cos(\omega_{xy}t), \quad z_T = 1 + 0.5\
 
 with $`\omega_{xy} = 2\pi/6.25\,\mathrm{s}`$ and $`\omega_z = 2\pi/12.5\,\mathrm{s}`$. The drone flies an ellipse of $`2\,\mathrm{m}\times 4\,\mathrm{m}`$ every $`6.25\,\mathrm{s}`$, while its height swings between $`0.5`$ and $`1.5\,\mathrm{m}`$ and its heading swings $`\pm 1\,\mathrm{rad}`$ every $`12.5\,\mathrm{s}`$. Position and heading change at the same time, which tests the decoupling. Because sines can be differentiated any number of times, all derivatives are exact.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`x_T, y_T, z_T`$ | reference position | $`\mathrm{m}`$ |
+| $`\varphi_T`$ | reference heading | $`\mathrm{rad}`$ |
+| $`\omega_{xy}`$ | angular frequency of the horizontal ellipse, $`1.005\,\mathrm{rad/s}`$ | $`\mathrm{rad/s}`$ |
+| $`\omega_z`$ | angular frequency of the height and heading swing, $`0.503\,\mathrm{rad/s}`$ | $`\mathrm{rad/s}`$ |
+| $`t`$ | time | $`\mathrm{s}`$ |
+
+**Example.** The horizontal speed is $`\sqrt{(\omega_{xy}\cos\omega_{xy}t)^2 + (2\omega_{xy}\sin\omega_{xy}t)^2}`$, largest on the long side of the ellipse: $`2\,\omega_{xy} = 2.0\,\mathrm{m/s}`$.
+
+**See:** [Figure 5](#fig-5) (left, the helix in 3D) and [Figure 14](#fig-14) (tracking of all four signals).
+
 **Figure-8:**
 
 ```math
@@ -456,11 +669,30 @@ x_T = 2\sin(\omega t), \quad y_T = \sin(2\omega t), \quad z_T = 1.2 + 0.3\cos(\o
 
 $`y`$ runs at twice the frequency of $`x`$, which draws the figure-8 every $`12\,\mathrm{s}`$.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\omega`$ | angular frequency, $`0.524\,\mathrm{rad/s}`$ | $`\mathrm{rad/s}`$ |
+| $`2\sin(\omega t)`$ | $`x`$ swings $`\pm 2\,\mathrm{m}`$ once per period | $`\mathrm{m}`$ |
+| $`\sin(2\omega t)`$ | $`y`$ swings $`\pm 1\,\mathrm{m}`$ twice per period: this crosses the path into an "8" | $`\mathrm{m}`$ |
+
+**Example.** The top speed is reached at the crossing point: $`\sqrt{(2\omega)^2 + (2\omega)^2} = 2\sqrt2\,\omega = 1.48\,\mathrm{m/s}`$.
+
+**See:** [Figure 5](#fig-5), right.
+
 **Mission (auto mode):** takeoff → hover → helix (4 periods) → figure-8 (2 periods) → hover, repeating. Joining trajectories end-to-end would create jumps in velocity, so each piece runs on a warped time $`\tau(t)`$ instead of real time:
 
 ```math
 x_T(t) = p\big(\tau(t)\big), \qquad \dot\tau(t) = s(u), \qquad s(u) = 126u^5 - 420u^6 + 540u^7 - 315u^8 + 70u^9
 ```
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`p(\cdot)`$ | the trajectory piece (helix, figure-8, …) as a function of its own time | $`\mathrm{m}`$ |
+| $`\tau(t)`$ | warped time: how far along the piece the reference is | $`\mathrm{s}`$ |
+| $`\dot\tau = s(u)`$ | speed factor, from $`0`$ (stopped) to $`1`$ (full speed) | – |
+| $`u`$ | normalised time inside the ramp, $`u = (t - t_0)/T_{ramp}`$ | – |
+
+**Example.** $`s(0) = 0`$, $`s(0.5) = 0.5`$, $`s(1) = 1`$, and the first four derivatives of $`s`$ are $`0`$ at $`u = 0`$ and $`u = 1`$: the drone eases into and out of every piece.
 
 - $`p`$ is the trajectory piece and $`u \in [0, 1]`$ the normalised time within the speed-up (or slow-down) phase.
 - The speed factor $`\dot\tau`$ ramps from $`0`$ to $`1`$ with the degree-9 smoothstep $`s(u)`$, whose first four derivatives are zero at both ends. The drone is at rest at every joint, and the reference stays continuous up to snap.
@@ -481,6 +713,16 @@ x_T(t) = p\big(\tau(t)\big), \qquad \dot\tau(t) = s(u), \qquad s(u) = 126u^5 - 4
 \tilde\omega = \omega + n_\omega,\quad n_\omega \sim \mathcal N(0, \sigma_\omega^2 I)
 ```
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`p, v, \omega`$ | true position, velocity and angular rate (from the simulator) | $`\mathrm{m},\ \mathrm{m/s},\ \mathrm{rad/s}`$ |
+| $`\tilde p, \tilde v, \tilde\omega`$ | measured (noisy) values given to the filter | same |
+| $`n_p, n_v, n_\omega`$ | random noise vectors, new at every step | same |
+| $`\sigma_p, \sigma_v, \sigma_\omega`$ | standard deviation of each noise (table below) | same |
+| $`I`$ | $`3\times 3`$ identity: the three axes are independent | – |
+
+**See:** [Figure 16](#fig-16): the grey dots are $`\tilde p`$.
+
 - The tilde marks a measured value; $`p, v, \omega`$ are the true position, velocity and angular rate.
 - $`\mathcal N(0, \sigma^2 I)`$ means each axis gets an independent random value with mean $`0`$ and standard deviation $`\sigma`$. About $`68\,\%`$ of the samples are within $`\pm\sigma`$ and $`99.7\,\%`$ within $`\pm 3\sigma`$.
 
@@ -500,7 +742,10 @@ x_T(t) = p\big(\tau(t)\big), \qquad \dot\tau(t) = s(u), \qquad s(u) = 126u^5 - 4
 
 **Purpose.** The Kalman filter [7] combines two sources of information: a **prediction** from the motion model (where the drone should be, given its last estimate and the commanded acceleration) and the noisy **measurement**. It weighs them by how much each can be trusted and produces an estimate that is much more accurate than either alone.
 
+<a name="fig-6"></a>
 ![Kalman filter cycle: predict with the model and the commanded acceleration, then update with the noisy measurement](docs/images/fig_kalman_cycle.png)
+
+*Figure 6: One Kalman-filter cycle: predict, then update.*
 
 **State and model.** The filter estimates $`\hat s = [\,\hat p^\top\ \ \hat v^\top\,]^\top`$ (3D position and velocity, six numbers). Between two steps ($`\Delta t = 2\,\mathrm{ms}`$) the motion follows the constant-acceleration equations $`p_{k+1} = p_k + v_k\Delta t + \tfrac12 a\,\Delta t^2`$ and $`v_{k+1} = v_k + a\,\Delta t`$. In matrix form:
 
@@ -512,6 +757,18 @@ B = \begin{bmatrix} \tfrac12\Delta t^2 I_3\\ \Delta t\, I_3\end{bmatrix}
 
 $`F`$ moves the position by velocity times time, $`B`$ adds the effect of the acceleration $`u_k`$, and $`w_k`$ is the model error.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`s_k`$ | true state at step $`k`$: position and velocity (6 numbers) | $`\mathrm{m},\ \mathrm{m/s}`$ |
+| $`F`$ | state-transition matrix (constant-acceleration model) | – |
+| $`B`$ | input matrix: how the acceleration enters | – |
+| $`u_k`$ | acceleration input (next formula) | $`\mathrm{m/s^2}`$ |
+| $`w_k`$ | process noise: everything the model does not know | – |
+| $`\Delta t`$ | filter step, $`2\,\mathrm{ms}`$ | $`\mathrm{s}`$ |
+| $`I_3`$ | $`3\times 3`$ identity | – |
+
+**See:** [Figure 6](#fig-6), the "1. Predict" box.
+
 **Control input: the controller's model acceleration.** Instead of guessing the acceleration, the filter uses the one the controller commands:
 
 ```math
@@ -520,6 +777,14 @@ u = g + \tfrac{1}{m}\,R(q)\,e_3\,T + f(v)
 
 gravity, plus the thrust pointed along the drone's $`z`$-axis $`R(q)e_3`$, divided by the mass, plus drag. Because the filter knows the drone is accelerating, its prediction moves with the drone and it does not lag behind during manoeuvres. Without this input the estimate lagged by up to $`11.5\,\mathrm{cm}`$ on the helix.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`u`$ | acceleration the filter uses for its prediction | $`\mathrm{m/s^2}`$ |
+| $`R(q)\,e_3`$ | the drone's own $`z`$-axis in the world frame, $`e_3 = (0,\ 0,\ 1)`$ | – |
+| $`T`$ | commanded thrust magnitude | $`\mathrm{N}`$ |
+
+**See:** [Figure 6](#fig-6): the arrow "model acceleration from the controller" entering the predict step.
+
 **Process noise $`Q`$ (how much the model is trusted).** Unknown accelerations (wind, model errors) are modelled as white noise with $`\sigma_a = 0.3\,\mathrm{m/s^2}`$. Integrating that acceleration over one step gives, per axis:
 
 ```math
@@ -527,6 +792,13 @@ Q = \sigma_a^2 \begin{bmatrix} \Delta t^4/4 & \Delta t^3/2\\ \Delta t^3/2 & \Del
 ```
 
 The position uncertainty grows with $`(\tfrac12\Delta t^2)^2`$, the velocity uncertainty with $`\Delta t^2`$, and the two are correlated.
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`Q`$ | process-noise covariance (per axis; position–velocity block) | $`\mathrm{m^2},\ \mathrm{m^2/s},\ \mathrm{m^2/s^2}`$ |
+| $`\sigma_a`$ | standard deviation of the unknown acceleration, $`0.3\,\mathrm{m/s^2}`$ | $`\mathrm{m/s^2}`$ |
+
+**Example.** With $`\Delta t = 2\,\mathrm{ms}`$, the velocity uncertainty added per step is $`\sigma_a\,\Delta t = 0.6\,\mathrm{mm/s}`$, far smaller than the sensor noise $`\sigma_v = 8\,\mathrm{cm/s}`$. The filter therefore trusts its model much more than a single measurement and only slowly pulls toward the average of many measurements, which is what removes the noise.
 
 **Measurement noise $`R`$ (how much the sensors are trusted).** The measurement is $`z_k = [\,\tilde p^\top\ \ \tilde v^\top\,]^\top = H s_k + n_k`$ with $`H = I_6`$ (position and velocity are measured directly) and $`R = \mathrm{diag}(\sigma_p^2 I_3,\ \sigma_v^2 I_3)`$, the sensor variances from 4.10.
 
@@ -538,11 +810,31 @@ The position uncertainty grows with $`(\tfrac12\Delta t^2)^2`$, the velocity unc
 \hat s^- = F\hat s + Bu, \qquad P^- = FPF^\top + Q
 ```
 
+| Symbol | Meaning |
+|---|---|
+| $`\hat s`$ | current estimate (after the last update) |
+| $`\hat s^-`$ | predicted estimate, before the new measurement is used |
+| $`P,\ P^-`$ | covariance (uncertainty) of $`\hat s`$ and of $`\hat s^-`$ |
+
+**In words.** Move the estimate forward with physics; the uncertainty grows, because the model is not perfect.
+
+**See:** [Figure 6](#fig-6), box 1.
+
 **(2) Update:** compare the prediction with the measurement and correct it:
 
 ```math
 K = P^-H^\top(HP^-H^\top + R)^{-1}, \qquad \hat s = \hat s^- + K(z - H\hat s^-), \qquad P = (I-KH)P^-(I-KH)^\top + KRK^\top
 ```
+
+| Symbol | Meaning |
+|---|---|
+| $`K`$ | Kalman gain ($`6\times 6`$): how much of the innovation is accepted |
+| $`z`$ | measurement $`[\,\tilde p;\ \tilde v\,]`$ |
+| $`H`$ | measurement matrix, $`I_6`$ here |
+| $`R`$ | measurement-noise covariance from 4.10 |
+| $`I`$ | $`6\times 6`$ identity |
+
+**See:** [Figure 6](#fig-6), box 2; [Figure 16](#fig-16) (estimate error $`0.51\,\mathrm{cm}`$ RMS against $`8.7\,\mathrm{cm}`$ for the raw measurement); [Figure 17](#fig-17) (what this does to the motor commands).
 
 - $`z - H\hat s^-`$ is the *innovation*: how far the measurement is from the prediction.
 - The *Kalman gain* $`K`$ decides how much of it to accept. If the prediction is uncertain ($`P^-`$ large) compared with the sensor ($`R`$), $`K`$ is large and the measurement wins; if the sensor is noisy, $`K`$ is small and the prediction wins.
@@ -555,6 +847,16 @@ K = P^-H^\top(HP^-H^\top + R)^{-1}, \qquad \hat s = \hat s^- + K(z - H\hat s^-),
 ```
 
 Each step moves the estimate $`20\,\%`$ of the way toward the new measurement, which averages out the noise over the last few steps (time constant $`\approx 10\,\mathrm{ms}`$ at $`500\,\mathrm{Hz}`$).
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`\hat\omega_k`$ | filtered angular rate at step $`k`$ | $`\mathrm{rad/s}`$ |
+| $`\tilde\omega_k`$ | gyro measurement at step $`k`$ | $`\mathrm{rad/s}`$ |
+| $`\alpha`$ | smoothing factor ($`0`$: ignore new data, $`1`$: no filtering) | – |
+
+**Example.** For white noise this filter keeps a fraction $`\sqrt{\alpha/(2-\alpha)} = 0.33`$ of the noise standard deviation, so $`\sigma_\omega = 0.02\,\mathrm{rad/s}`$ becomes about $`0.007\,\mathrm{rad/s}`$. The time constant is $`-\Delta t/\ln(1-\alpha) = 9\,\mathrm{ms}`$.
+
+**See:** [Figure 17](#fig-17), lower panel: the roll torque command with and without filtering.
 
 **Result.** The controller receives $`\hat p, \hat v, \hat\omega`$ and the attitude quaternion. The position error of what it sees drops from $`8.7\,\mathrm{cm}`$ (raw) to $`0.5\,\mathrm{cm}`$ (estimate), and the torque-command chatter drops by about $`80\times`$ (section 6.2).
 
@@ -579,12 +881,39 @@ t_{far} = \min_{k}\ \max\!\Big(\frac{\ell_k - o_k}{d_k},\ \frac{h_k - o_k}{d_k}\
 
 The ray hits the box when $`t_{far} \ge t_{near} \ge 0`$, at distance $`t_{near}`$. This is computed for all $`237`$ solid boxes at once, and the smallest hit distance is the beam's range.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`o`$ | ray origin (the LiDAR position) | $`\mathrm{m}`$ |
+| $`d`$ | unit direction of the beam | – |
+| $`t`$ | distance along the ray | $`\mathrm{m}`$ |
+| $`\ell,\ h`$ | lower and upper corner of the box | $`\mathrm{m}`$ |
+| $`k`$ | axis index, $`x`$, $`y`$ or $`z`$ | – |
+| $`t_{near},\ t_{far}`$ | where the ray enters and leaves the box | $`\mathrm{m}`$ |
+
+**Example.** A beam from $`o = (0,\ 0,\ 1)`$ along $`d = (1,\ 0,\ 0)`$ and a box $`x \in [3, 5]`$, $`y \in [-1, 1]`$, $`z \in [0, 4]`$: on the $`x`$-axis the ray is inside the slab for $`t \in [3, 5]`$; it is parallel to the $`y`$- and $`z`$-slabs ($`d_k = 0`$) and already between them, so those slabs do not restrict $`t`$. Result: $`t_{near} = 3`$, $`t_{far} = 5`$, the beam measures $`3\,\mathrm{m}`$.
+
+**See:** [Figure 18](#fig-18): each orange beam ends at its $`t_{near}`$.
+
 **Step 1: repulsion [9].** A beam with direction $`d_i`$ and range $`r_i`$ shorter than the detection distance $`d_{det}`$ sees an obstacle. Each such beam pushes the drone away, harder the closer the obstacle is:
 
 ```math
 s_i = \left(\frac{d_{det} - \max(r_i,\, \kappa\, d_{safe})}{d_{det} - \kappa\, d_{safe}}\right)^{1.5}, \qquad
 \mathbf r = -\sum_i s_i\, d_i
 ```
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`r_i`$ | measured range of beam $`i`$ | $`\mathrm{m}`$ |
+| $`d_i`$ | unit direction of beam $`i`$ | – |
+| $`d_{det}`$ | detection distance: beams shorter than this count | $`\mathrm{m}`$ |
+| $`d_{safe}`$ | safety distance the drone should keep | $`\mathrm{m}`$ |
+| $`\kappa`$ | lower saturation factor, $`0.5`$ | – |
+| $`s_i`$ | push strength of beam $`i`$, between $`0`$ and $`1`$ | – |
+| $`\mathbf r`$ | total push direction | – |
+
+**Example.** With $`d_{det} = 2\,\mathrm{m}`$ and $`d_{safe} = 1\,\mathrm{m}`$: an obstacle at $`1.5\,\mathrm{m}`$ gives $`s = (0.5/1.5)^{1.5} = 0.19`$; at $`1.0\,\mathrm{m}`$, $`s = (1/1.5)^{1.5} = 0.54`$; at $`0.5\,\mathrm{m}`$ or closer, $`s = 1`$.
+
+**See:** [Figure 18](#fig-18) (the two beams that hit obstacles) and the GIF in [Figure 8](#fig-8) (beams turn orange when they hit).
 
 - $`s_i`$ is $`0`$ at the edge of the detection zone and grows to its maximum as the obstacle reaches $`\kappa\,d_{safe}`$ (with $`\kappa = 0.5`$, so very close readings do not blow up).
 - The exponent $`1.5`$ makes the push gentle far away and strong close by.
@@ -598,6 +927,19 @@ s_i = \left(\frac{d_{det} - \max(r_i,\, \kappa\, d_{safe})}{d_{det} - \kappa\, d
 w = \mathrm{clip}\!\left(\frac{d_{det} - r_{min}}{d_{det} - d_{safe}},\ 0,\ 1\right), \qquad
 v_{cmd} = \max(w_{min},\ 1-w)\,v_{nom} + w\,v_{av}
 ```
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`r_{min}`$ | shortest range among the beams that count | $`\mathrm{m}`$ |
+| $`w`$ | blending weight, $`0`$ (plan only) to $`1`$ (avoidance only) | – |
+| $`v_{nom}`$ | velocity along the planned curve | $`\mathrm{m/s}`$ |
+| $`v_{av}`$ | avoidance velocity (push plus slide) | $`\mathrm{m/s}`$ |
+| $`w_{min}`$ | minimum share of the planned velocity | – |
+| $`\mathrm{clip}(x, 0, 1)`$ | limits $`x`$ to the range $`[0, 1]`$ | – |
+
+**Example.** With $`d_{det} = 2\,\mathrm{m}`$ and $`d_{safe} = 1\,\mathrm{m}`$, the nearest obstacle at $`1.5\,\mathrm{m}`$ gives $`w = 0.5`$: half plan, half avoidance.
+
+**See:** [Figure 21](#fig-21): the orange dots mark where $`w \gt 0`$, and the clearance never drops below $`d_{safe}`$; the GIF in [Figure 8](#fig-8) shows "LiDAR avoider ACTIVE" at the same moments.
 
 - At the detection distance $`w = 0`$: the drone follows its plan.
 - At the safety distance $`w = 1`$: the avoidance velocity takes over completely.
@@ -633,6 +975,18 @@ f(n) = g(n) + h(n), \qquad h(n) = (\Delta x + \Delta y) + (\sqrt2 - 2)\min(\Delt
 
 $`h`$ is the octile distance (the exact length when moving in 8 directions with no obstacles), which never overestimates, so A\* returns the shortest route. Diagonal moves that would cut a blocked corner are not allowed.
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`n`$ | a grid cell | – |
+| $`g(n)`$ | length of the best path found so far from the start to $`n`$ | cells |
+| $`h(n)`$ | estimate of the remaining length from $`n`$ to the goal (octile distance) | cells |
+| $`f(n)`$ | estimated total length of a path through $`n`$ | cells |
+| $`\Delta x,\ \Delta y`$ | number of cells between $`n`$ and the goal along $`x`$ and $`y`$ | cells |
+
+**Example.** $`\Delta x = 3`$, $`\Delta y = 1`$: $`h = 4 + (1.414 - 2)\cdot 1 = 3.41`$ cells, exactly two straight steps plus one diagonal step ($`2 + 1.414`$). With $`0.5\,\mathrm{m}`$ cells that is $`1.71\,\mathrm{m}`$.
+
+**See:** [Figure 19](#fig-19): the purple polyline is the shortened A\* route.
+
 - **Line-of-sight shortening** removes every waypoint that can be skipped without hitting an obstacle, leaving only the real corners.
 
 **Step 4: over the top.** If no route exists at that height (the target is inside a closed courtyard), the drone climbs above the highest building on the way, crosses over, and descends to the target.
@@ -644,7 +998,22 @@ B(u) = (1-u)^2 A_i + 2u(1-u)P_i + u^2 C_i, \qquad
 A_i = P_i - r_i\,\hat e_{in}, \quad C_i = P_i + r_i\,\hat e_{out}, \quad u \in [0, 1]
 ```
 
+| Symbol | Meaning | Unit |
+|---|---|---|
+| $`P_i`$ | corner $`i`$ of the A\* route | $`\mathrm{m}`$ |
+| $`\hat e_{in},\ \hat e_{out}`$ | unit directions of the incoming and outgoing legs | – |
+| $`r_i`$ | rounding distance from the corner | $`\mathrm{m}`$ |
+| $`A_i,\ C_i`$ | start and end of the curve, on the two legs | $`\mathrm{m}`$ |
+| $`u`$ | curve parameter, $`0`$ at $`A_i`$ and $`1`$ at $`C_i`$ | – |
+
+**Example.** For a right-angle corner with $`P = (0, 0)`$, $`A = (-r, 0)`$ and $`C = (0, r)`$, the middle of the curve is $`B(0.5) = \tfrac14 A + \tfrac12 P + \tfrac14 C = (-r/4,\ r/4)`$: it passes $`0.35\,r`$ inside the corner, which is why the curve is checked again for collisions.
+
+**See:** [Figure 7](#fig-7) (one corner), [Figure 19](#fig-19) (top view of a full route) and [Figure 20](#fig-20) (side view: climbing while turning).
+
+<a name="fig-7"></a>
 ![Corner rounding geometry: the Bezier curve leaves the incoming leg at A and joins the outgoing leg at C, tangent to both](docs/images/fig_bezier_corner.png)
+
+*Figure 7: Rounding one route corner with a quadratic Bézier curve.*
 
 - $`\hat e_{in}`$ and $`\hat e_{out}`$ are the unit directions of the legs entering and leaving the corner; $`A_i`$ and $`C_i`$ are where the curve leaves and rejoins the legs.
 - The derivative is $`B'(0) = 2(P_i - A_i)`$ and $`B'(1) = 2(C_i - P_i)`$, both along the legs, so the curve meets each leg without a kink: the whole path is $`C^1`$.
@@ -666,6 +1035,11 @@ A_i = P_i - r_i\,\hat e_{in}, \quad C_i = P_i + r_i\,\hat e_{out}, \quad u \in [
 ## 5. Simulation
 
 All simulators run the same controller, gains, noise model, Kalman filter, LiDAR avoidance and planner. They also fly in the same procedurally generated city.
+
+<a name="fig-8"></a>
+![Animated city flight: the drone takes off from the helipad, follows the planned curve between the buildings with its LiDAR beams, and reaches the target, while the tracking error and the obstacle clearance are drawn live](docs/images/sim_city_flight.gif)
+
+*Figure 8: Simulation in motion: city flight to $`(-14,\ -30,\ 3)`$ with noise, Kalman filter, LiDAR (orange beams = hits) and planner. Left: 3D view; right: tracking error and obstacle clearance, drawn live.*
 
 | | MuJoCo [13] | PyBullet [14], [15] | Gazebo 11 [16] | 3D web dashboard |
 |---|---|---|---|---|
@@ -700,7 +1074,10 @@ The drone is driven only by the controller's thrust and body torques (MuJoCo act
 
 The screenshot below shows the drone taking the curved route out of the plaza around the clock tower.
 
+<a name="fig-9"></a>
 ![MuJoCo: curved, planned route out of the plaza (orange trail)](docs/images/sim_mujoco_city_flight.jpg)
+
+*Figure 9: MuJoCo simulation of the city flight.*
 
 ### 5.3 PyBullet (gym-pybullet-drones)
 
@@ -709,7 +1086,10 @@ The Crazyflie CF2X [15] is driven through its four motor RPMs, computed by a for
 - **Window:** $`1280\times 720`$ without side panels, with shadows and live values pinned to the top-left corner.
 - **Keys:** `1`/`2`/`3` follow / overview / top camera, `4` trail on/off, arrows rotate, `=`/`-` zoom.
 
+<a name="fig-10"></a>
 ![PyBullet: values in the corner, planned route and trail](docs/images/sim_pybullet.jpg)
+
+*Figure 10: PyBullet simulation with the Crazyflie.*
 
 ### 5.4 Gazebo 11
 
@@ -718,7 +1098,10 @@ Gazebo's drone model is kinematic: Gazebo renders the pose computed by the $`500
 - **Pose transport:** a small Gazebo model plugin, `gazebo_plugin/udp_pose_plugin.cc`, receives the drone pose and the target-marker pose over UDP and applies them every physics step, so the motion is smooth. If the plugin is not built, `gz model` is used instead.
 - **Launch:** `launch_gazebo_wsl.py` starts Gazebo inside WSL. It uses WSLg on Windows 11, or VcXsrv.
 
+<a name="fig-11"></a>
 ![Gazebo 11: the same city, drone and target marker](docs/images/sim_gazebo.jpg)
+
+*Figure 11: Gazebo 11 simulation of the same city.*
 
 ### 5.5 3D web dashboard (Gazebo backend)
 
@@ -735,7 +1118,10 @@ Gazebo's drone model is kinematic: Gazebo renders the pose computed by the $`500
 | Modes | auto mission, paper helix, figure-8, hover, land |
 | Export | all trajectory values, **one row per simulated second**, 32 columns, as CSV or JSON; each export is also saved in `results/` |
 
+<a name="fig-12"></a>
 ![Web dashboard: route check before flying (the target was inside a building and is moved out; curved route between buildings, narrowest gap 4.3 m)](docs/images/sim_web_route_check.jpg)
+
+*Figure 12: Route check in the 3D web dashboard.*
 
 **Export columns:**
 
@@ -788,25 +1174,40 @@ Rigid-body model ($`m = 1.5\,\mathrm{kg}`$, $`J = \mathrm{diag}(0.03,\ 0.03,\ 0.
 
 The torque chatter is the RMS of the torque-command rate, $`\sqrt{\overline{\lVert\dot\tau\rVert^2}}`$ in $`\mathrm{N\,m/s}`$. The full table is in [`results_table.md`](results_table.md).
 
+<a name="fig-13"></a>
 ![Bar chart: position RMSE of the full backstepping law (0.01, 0.00, 0.64 cm) versus the simplified 2-step law (13.60, 20.62, 17.01 cm)](docs/images/fig_controller_comparison.png)
+
+*Figure 13: Position RMSE: full backstepping law versus the simplified 2-step law.*
 
 **Vertical helix.** The full law (blue) lies on the reference (grey) in $`x`$, $`y`$, $`z`$ and heading. The simplified 2-step law (orange) overshoots by about $`20\,\mathrm{cm}`$ and lags in heading. The heading follows $`\pm 1\,\mathrm{rad}`$ while the position error stays at zero, which shows the decoupling.
 
+<a name="fig-14"></a>
 ![Vertical helix tracking: x, y, z and heading versus time for the reference, the full backstepping law and the simplified law](docs/images/fig_helix_tracking.png)
+
+*Figure 14: Tracking the vertical helix (position and heading).*
 
 **Switched set points.** The commanded steps pass through the 5th-order reference model. The full law follows the S-curves exactly; the 2-step baseline overshoots and wobbles at every switch.
 
+<a name="fig-15"></a>
 ![Switched set points: x, y, z and heading versus time for the reference, the full backstepping law and the simplified law](docs/images/fig_setpoints_tracking.png)
+
+*Figure 15: Tracking switched set points through the reference model.*
 
 ### 6.2 Sensor noise and Kalman filter
 
 The upper plot shows the noisy position measurements (grey dots, $`\sigma_p = 5\,\mathrm{cm}`$ per axis) scattered around the true trajectory, and the Kalman-filter estimate (blue) on top of the reference. The lower plot shows the error of what the controller would see: **$`8.7\,\mathrm{cm}`$ RMS raw versus $`0.51\,\mathrm{cm}`$ RMS after the Kalman filter**, about $`17\times`$ less.
 
+<a name="fig-16"></a>
 ![Noisy measurements versus Kalman-filter estimate on the vertical helix, and the 3D position error of both](docs/images/fig_noise_kalman.png)
+
+*Figure 16: Noisy measurements versus the Kalman-filter estimate.*
 
 The tracking error itself is about the same with or without the filter, because the backstepping law is robust. The difference is in the actuators. Without the filter the roll torque command jumps by $`\pm 600\,\mathrm{mN\,m}`$ every step. With the filter it is smooth: the torque-rate RMS drops from **$`249`$ to $`3\,\mathrm{N\,m/s}`$**.
 
+<a name="fig-17"></a>
 ![Tracking error and roll torque command with ideal sensors, with noise and no filter, and with noise and the Kalman filter](docs/images/fig_kalman_torque.png)
+
+*Figure 17: Effect of noise and of the Kalman filter on tracking error and torque command.*
 
 ### 6.3 Full mission in the 3D simulators (noise + Kalman filter, 75 s)
 
@@ -824,7 +1225,10 @@ The same gains fly two vehicles whose masses differ by a factor of $`55`$ with t
 
 The drone is $`1\,\mathrm{m}`$ above the plaza, heading $`30^\circ`$. The forward beam detects the clock tower at $`1.8\,\mathrm{m}`$, inside the $`2.0\,\mathrm{m}`$ detection distance, so the avoider becomes active. The rear-right beam sees the metro entrance at $`5.5\,\mathrm{m}`$. The other beams are clear up to $`8\,\mathrm{m}`$.
 
+<a name="fig-18"></a>
 ![LiDAR object detection in the plaza: two beams hit obstacles, the others are clear](docs/images/fig_lidar_detection.png)
+
+*Figure 18: LiDAR beams in the plaza: hits (orange) and clear beams (green).*
 
 ### 6.5 Redirecting the trajectory
 
@@ -834,11 +1238,17 @@ The drone is $`1\,\mathrm{m}`$ above the plaza, heading $`30^\circ`$. The forwar
 - A\* finds a route through the streets.
 - Corner rounding turns the sharp-cornered route (purple) into the smooth curve the drone actually flies (blue).
 
+<a name="fig-19"></a>
 ![Global path planner: blocked straight line, A* route with sharp corners and the smoothed curve that is flown](docs/images/fig_planner_routes.png)
+
+*Figure 19: Global planner on the city map: blocked line, A* route and flown curve.*
 
 **Corner rounding, side view.** The A\* route to $`(12,\ 10,\ 9)`$ goes straight up $`8.8\,\mathrm{m}`$ and then across. The smoothed curve starts turning right after takeoff, so the drone climbs while it turns and still passes well above the clock tower.
 
+<a name="fig-20"></a>
 ![Side view: the A* route climbs vertically then flies across; the smoothed curve climbs while turning](docs/images/fig_curve_side.png)
+
+*Figure 20: Side view of a planned takeoff: climbing while turning.*
 
 **Route-check results (web dashboard, drone at the helipad).**
 
@@ -859,7 +1269,10 @@ This is the flight to $`(-14,\ -30,\ 3)`$ in the Gazebo flight core, with the pa
 - **Clearance:** the minimum distance to any obstacle is $`1.57\,\mathrm{m}`$, always above the $`1.0\,\mathrm{m}`$ safety distance. The LiDAR avoider was active for $`18\,\%`$ of the flight (orange dots), mainly on the last leg next to the building at the target.
 - **Arrival:** the drone arrives at the moved target, $`(-15,\ -30,\ 3)`$.
 
+<a name="fig-21"></a>
 ![City flight: top view of the planned and flown path, tracking error over time and distance to the nearest obstacle](docs/images/fig_city_flight.png)
+
+*Figure 21: Full city flight: path, tracking error and clearance.*
 
 ### 6.7 Key observations
 
