@@ -1,0 +1,26 @@
+# Python packages for the quadrotor backstepping project (Python 3.10 - 3.12).
+#   pip install -r requirements.txt
+# gym-pybullet-drones is used directly from the folder gym_pybullet_drones_repo
+# (see README -> Installation); it is NOT listed here on purpose, because its own
+# dependency list pulls in torch and a pybullet version that must be compiled on Windows.
+
+# --- core: controller, Kalman filter, planner, plots ---------------------------------
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pyyaml>=6.0
+pillow>=9.0
+
+# --- MuJoCo simulation -----------------------------------------------------------------
+mujoco>=3.1
+
+# --- PyBullet simulation (gym-pybullet-drones) -------------------------------------------
+pybullet>=3.2.5
+gymnasium>=0.29
+
+# --- ArduPilot / MAVLink bridge and the WebSocket telemetry page --------------------------
+pymavlink>=2.4.40
+websockets>=12
+
+# --- tests -------------------------------------------------------------------------------
+pytest>=7.4
